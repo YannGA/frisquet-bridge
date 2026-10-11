@@ -61,6 +61,7 @@ DEVICE_NAMES: dict[int, str] = {
 }
 
 ACK_FLAG = 0x80
+ASSOC_BROADCAST_CONTROL = 0x02
 
 
 class FrameError(ValueError):
@@ -152,6 +153,17 @@ class Frame:
         if self.payload:
             parts.append(f"data={self.payload_hex}")
         return " | ".join(parts)
+
+
+def association_network_id(frame: Frame) -> bytes | None:
+    """The network id carried by the boiler's association broadcast, else None.
+
+    The boiler announces the network id in ``0x02``-controlled ASSOCIATION frames
+    addressed to everyone: a leading type byte then the 4 id bytes.
+    """
+    if frame.msg_type != MSG_ASSOCIATION or frame.control != ASSOC_BROADCAST_CONTROL: return None
+    if frame.to_addr != ADDR_BROADCAST or len(frame.payload) < 5: return None
+    return frame.payload[1:5]
 
 
 def device_name(addr: int) -> str:

@@ -6,6 +6,7 @@ import struct
 from dataclasses import dataclass
 
 from frisquet_bridge.connect.codec import BoilerDate, decode_pressure16, decode_temp16, decode_temp8
+from frisquet_bridge.frame import DEVICE_NAMES
 from frisquet_bridge.model import (
     OUTSIDE_TEMP_ABSENT,
     BoilerData,
@@ -455,11 +456,13 @@ def describe_boiler_event(payload: bytes) -> str:
     except ValueError as exc:
         return f"BOILER_EVENT decode error: {exc}"
 
-    tag = event.memory_tag.hex()
+    tag = event.memory_tag
     parts = [
         "BOILER_EVENT",
         f"kind={event.kind_label}",
-        f"tag=0x{tag}",
+        f"tag=0x{tag.hex()}",
+        f"device={DEVICE_NAMES.get(tag[1], f'0x{tag[1]:02x}')}",
+        f"param=0x{tag[2]:02x}",
         f"stamp={event.stamp.hex()}",
     ]
     if event.tail != b"\x00" * 13:

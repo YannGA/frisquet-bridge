@@ -228,11 +228,14 @@ Observed behaviour from long captures:
   `0xa0f0` block itself is pushed on unrelated program/manual changes and is not
   decoded.
 
-- **`BOILER_EVENT` (`0x45`)** is a fixed **21-byte** notification tied to the
-  boiler's parameter block: tags `0x0a8030`, `0x0a8031` and `0x0a8032` were each
-  observed, sent three times in a row, so the tag identifies *which* word of the
-  block the event refers to (the same tags appear in the `0x7a18`
-  daily-consumption block the Connect reads every ~20 minutes). Layout:
+- **`BOILER_EVENT` (`0x45`)** is a fixed **21-byte** notification whose 3-byte
+  tag names a device-scoped parameter word: `0x0a | device | param`. Every
+  observed tag starts `0x0a`; the middle byte is the device address (`0x80` the
+  boiler, `0x7e` the Connect) and the last byte selects the word — `0x30`,
+  `0x31`, `0x32` on the boiler (three consecutive words) and `0x01`/`0x02` on the
+  Connect. Each event is sent three times in a row, and the same tags appear in
+  the `0x7a18` daily-consumption block the Connect reads every ~20 minutes.
+  Layout:
 
   ```
   [kind u8][tag 3B][stamp 4B][tail 13B]
@@ -242,8 +245,10 @@ Observed behaviour from long captures:
   pair. In the isolated `logs/re/max-temp.raw.jsonl` capture this pair was the
   **only** push produced by changing the **maximum temperature**, so `0x45`
   correlates with a max-temperature / boiler-parameter change. The 4-byte
-  `stamp` increments between the pair (low byte `ac→ad`) but is **not** a plain
-  timestamp (it decodes to year 2001 under the 4-byte timestamp byte order). The changed
+  `stamp` is **not** a plain timestamp: its first byte is a per-event counter
+  (`ac→ad` between the set/clear pair, `0x90→0x91→0x92` within one burst) over a
+  3-byte value that stays constant for a session (it decodes to year 2001 under
+  the 4-byte timestamp byte order). The changed
   value has not yet been localized — `tail` was all-zero in the clean capture —
   so the payload beyond `kind` is currently treated as opaque. (An earlier mixed
   capture showed a `0x40` bit in the tail; that is **unconfirmed** as boost.)

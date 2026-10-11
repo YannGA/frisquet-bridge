@@ -106,4 +106,7 @@ to the Connect using:
 Connect ACK of either push: swapped addresses, same `request_id`, `control=0x85`,
 same `msg_type`, payload often empty (memory push ACK may echo `addr+len` only).
 
+The Connect also emits `0x44` with a 2-byte payload (`0x0100`/`0x0200`) and the
+boiler ACKs it (`0x85`); observed six times in one session, meaning unidentified.
+
 Detailed field semantics and capture methodology: [`FRISQUET.md`](./FRISQUET.md) §6.6.

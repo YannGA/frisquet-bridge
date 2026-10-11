@@ -12,12 +12,12 @@ import structlog
 from frisquet_bridge.connect.state import ProtocolState
 from frisquet_bridge.frame import (
     ADDR_BOILER,
-    ADDR_BROADCAST,
     ADDR_CONNECT,
     MSG_ADDRESS_NOT_FOUND,
     MSG_ASSOCIATION,
     MSG_READ,
     Frame,
+    association_network_id,
 )
 from frisquet_bridge.transport.base import Transport, TransportError
 
@@ -350,9 +350,8 @@ class FrisquetClient:
                 try: received = await asyncio.wait_for(queue.get(), remaining)
                 except TimeoutError: raise TransportError("network id recovery timed out (no broadcast)") from None
                 frame = received.frame
-                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02: continue
-                if frame.to_addr != ADDR_BROADCAST or len(frame.payload) < 5: continue
-                network_id = frame.payload[1:5]
+                network_id = association_network_id(frame)
+                if network_id is None: continue
                 log.info("network_id_recovered", network_id=network_id.hex())
                 return network_id
 
@@ -378,11 +377,9 @@ class FrisquetClient:
                     raise TransportError("pairing timed out (no broadcast)") from None
 
                 frame = received.frame
-                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02: continue
-                if frame.to_addr != ADDR_BROADCAST: continue
-                if len(frame.payload) < 5: continue
+                network_id = association_network_id(frame)
+                if network_id is None: continue
 
-                network_id = frame.payload[1:5]
                 result = Association(
                     network_id=network_id,
                     association_id=frame.association_id,

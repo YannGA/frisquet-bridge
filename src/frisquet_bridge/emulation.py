@@ -135,42 +135,34 @@ class PassiveMirror:
             with contextlib.suppress(ValueError):
                 decode_satellite_init_response(frame.payload, self._data)
 
+    def _addr_pair(self, base: int) -> tuple[int, int]:
+        return (base, memory_address(base, boiler_addr=self._boiler_addr))
+
     def _handle_read_response(
         self,
         addr: int | None, # READ address remembered from the request, if matched
         payload: bytes, # boiler's response payload
     ) -> None:
         if addr is None: return
-        sensors = (ADDR_SENSORS, memory_address(ADDR_SENSORS, boiler_addr=self._boiler_addr))
-        if addr in sensors:
+        if addr in self._addr_pair(ADDR_SENSORS):
             try:
                 decode_sensors(payload, self._data)
             except ValueError:
                 log.debug("ignored short sensors payload")
             return
-        consumption_live = (
-            ADDR_CONSUMPTION,
-            memory_address(ADDR_CONSUMPTION, boiler_addr=self._boiler_addr),
-        )
-        daily_consumption = (
-            ADDR_DAILY_CONSUMPTION,
-            memory_address(ADDR_DAILY_CONSUMPTION, boiler_addr=self._boiler_addr),
-        )
-        if addr in consumption_live:
+        if addr in self._addr_pair(ADDR_CONSUMPTION):
             with contextlib.suppress(ValueError):
                 decode_consumption(payload, self._data)
             return
-        if addr in daily_consumption:
+        if addr in self._addr_pair(ADDR_DAILY_CONSUMPTION):
             with contextlib.suppress(ValueError):
                 decode_daily_consumption(payload, self._data)
             return
-        dhw_mode_addrs = (ADDR_DHW_MODE, memory_address(ADDR_DHW_MODE, boiler_addr=self._boiler_addr))
-        if addr in dhw_mode_addrs:
+        if addr in self._addr_pair(ADDR_DHW_MODE):
             with contextlib.suppress(ValueError):
                 decode_dhw_mode(payload, self._data)
             return
-        clock_addrs = (ADDR_DATE, memory_address(ADDR_DATE, boiler_addr=self._boiler_addr))
-        if addr in clock_addrs:
+        if addr in self._addr_pair(ADDR_DATE):
             with contextlib.suppress(ValueError):
                 decode_clock(payload, self._data)
 

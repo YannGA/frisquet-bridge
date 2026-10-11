@@ -9,8 +9,10 @@ from frisquet_bridge.connect.decode import (
     ADDR_DAILY_CONSUMPTION,
     ADDR_DATE,
     ADDR_DHW_MODE,
+    ADDR_SATELLITE_INFO,
     ADDR_SENSORS,
     ADDR_SENSORS_APP,
+    ADDR_ZONE_CONFIG,
     decode_clock,
     decode_consumption,
     decode_daily_consumption,
@@ -27,8 +29,6 @@ from frisquet_bridge.model import BoilerData, ZoneSource
 
 log = logging.getLogger(__name__)
 ZONE_IDS = {0x08: 1, 0x09: 2, 0x0A: 3}
-ADDR_SATELLITE_INFO = 0xA029
-ADDR_ZONE_CONFIG = 0xA154
 
 
 class PassiveReadTracker:

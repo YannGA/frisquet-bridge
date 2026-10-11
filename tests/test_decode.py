@@ -288,6 +288,7 @@ def test_boiler_event_push():
     assert (settle.kind, settle.kind_label) == (BOILER_EVENT_KIND_SET, "set")
     assert "kind=clear" in describe_boiler_event(BOILER_EVENT_CLEAR)
     assert "kind=set" in describe_boiler_event(BOILER_EVENT_SET)
+    assert "device=boiler param=0x31" in describe_boiler_event(BOILER_EVENT_CLEAR)
 
 
 def test_passive_read_tracker_init_frames():
