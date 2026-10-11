@@ -247,29 +247,26 @@ class RfHealth:
 
     @property
     def is_fresh(self) -> bool:
-        return (
-            self._last_success_monotonic is not None
-            and self.clock() - self._last_success_monotonic <= self.freshness_seconds
-        )
+        return self._last_success_monotonic is not None and self.clock() - self._last_success_monotonic <= self.freshness_seconds
 
     @property
     def state(self) -> str:
-        if self._last_success_monotonic is None:
-            return "unavailable"
-        if not self.is_fresh:
-            return "stale"
-        if self.consecutive_failures:
-            return "degraded"
+        if self._last_success_monotonic is None: return "unavailable"
+        if not self.is_fresh: return "stale"
+        if self.consecutive_failures: return "degraded"
         return "healthy"
 
-    def record_success(self, *, rssi: int | None = None) -> None:
+    def record_success(
+        self,
+        *,
+        rssi: int | None = None, # signal strength observed with this success, if any
+    ) -> None:
         self.attempts += 1
         self.successes += 1
         self.consecutive_failures = 0
         self._last_success_monotonic = self.clock()
         self.last_success = datetime.now(UTC).isoformat()
-        if rssi is not None:
-            self.last_rssi = rssi
+        if rssi is not None: self.last_rssi = rssi
 
     def record_nack(self) -> None:
         self._record_failure("nacks")
@@ -299,7 +296,13 @@ class BoilerData:
     rf_operations: dict[str, RfHealth] = field(default_factory=dict)
     last_seen_date: str | None = None
 
-    def rf_health(self, operation: str, *, freshness_seconds: float, zone: int | None = None) -> RfHealth:
+    def rf_health(
+        self,
+        operation: str, # logical RF operation name
+        *,
+        freshness_seconds: float, # age after which the operation counts as stale
+        zone: int | None = None, # zone the operation belongs to, if any
+    ) -> RfHealth:
         health = self.rf_operations.get(operation)
         if health is None:
             health = RfHealth(freshness_seconds=freshness_seconds, zone=zone)

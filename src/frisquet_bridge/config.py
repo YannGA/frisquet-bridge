@@ -62,7 +62,11 @@ class DeviceIdentity:
     association_id: int
     request_id: int
 
-    def state_kwargs(self, network_id: bytes, on_change: Callable[[object], None] | None = None) -> dict[str, object]:
+    def state_kwargs(
+        self,
+        network_id: bytes, # 4-byte site network id
+        on_change: Callable[[object], None] | None = None, # invoked with the state each time its request id advances
+    ) -> dict[str, object]:
         return {
             "network_id": network_id,
             "association_id": self.association_id,
@@ -174,8 +178,7 @@ class BridgeConfig:
         raise ConfigError(f"unknown identity role: {role}")
 
     def zone(self, number: int) -> ZoneConfig | None:
-        if number not in (1, 2, 3):
-            raise ConfigError(f"unknown zone: {number}")
+        if number not in (1, 2, 3): raise ConfigError(f"unknown zone: {number}")
         return getattr(self, f"zone{number}")
 
     def zone_enabled(self, number: int) -> bool:
@@ -193,7 +196,13 @@ class BridgeConfig:
 
         return persist
 
-    def set_identity(self, role: str, *, association_id: int, request_id: int) -> None:
+    def set_identity(
+        self,
+        role: str, # "connect", "sonde", or "satellite_z1".."satellite_z3"
+        *,
+        association_id: int, # association id already accepted by the boiler
+        request_id: int, # outbound request id to resume from
+    ) -> None:
         identity = DeviceIdentity(association_id=association_id, request_id=request_id)
         from frisquet_bridge.state_store import save_protocol_request_id
 
@@ -218,10 +227,8 @@ class BridgeConfig:
 
     def apply_protocol_request_ids(self, request_ids: dict[str, int]) -> None:
         for role, request_id in request_ids.items():
-            try:
-                self.identity(role).request_id = request_id
-            except ConfigError:
-                continue
+            try: self.identity(role).request_id = request_id
+            except ConfigError: continue
 
     def save(self) -> None:
         doc = tomlkit.document()
@@ -418,14 +425,16 @@ def _load_identity(table: dict[str, object], field_name: str) -> DeviceIdentity:
     return DeviceIdentity(association_id=association_id, request_id=0)
 
 
-def _load_zone(table: dict[str, object], field_name: str, zone_number: int) -> ZoneConfig:
+def _load_zone(
+    table: dict[str, object],
+    field_name: str,
+    zone_number: int, # 1, 2 or 3; central_boiler is only valid on zone1
+) -> ZoneConfig:
     _validate_keys(table, {"mode", "association_id"}, field_name)
     mode = _parse_zone_mode(_required_str(table, "mode", f"{field_name}.mode"), f"{field_name}.mode")
     if mode == "central_boiler" and zone_number != 1:
         raise ConfigError(f"{field_name}.mode: central_boiler is only valid on frisquet.zone1")
-    identity = None
-    if "association_id" in table or "request_id" in table:
-        identity = _load_identity(table, field_name)
+    identity = _load_identity(table, field_name) if "association_id" in table else None
     if mode in SATELLITE_IDENTITY_MODES and identity is None:
         raise ConfigError(f"missing required field: {field_name}.association_id")
     return ZoneConfig(mode=mode, identity=identity)
@@ -457,7 +466,11 @@ def _validate_logging(config: LoggingConfig) -> None:
         raise ConfigError("logging.raw_backup_count: expected non-negative integer")
 
 
-def _validate_keys(table: dict[str, object], allowed: set[str], field_name: str) -> None:
+def _validate_keys(
+    table: dict[str, object],
+    allowed: set[str], # keys the table may contain
+    field_name: str, # dotted name used in error messages
+) -> None:
     unknown = sorted(set(table) - allowed)
     if unknown:
         expected = ", ".join(sorted(allowed))
@@ -466,48 +479,43 @@ def _validate_keys(table: dict[str, object], allowed: set[str], field_name: str)
 
 def _required_table(parent: dict[str, object], name: str) -> dict[str, object]:
     table = parent.get(name)
-    if isinstance(table, dict):
-        return table
+    if isinstance(table, dict): return table
     raise ConfigError(f"missing required table: {name}")
 
 
 def _optional_table(parent: dict[str, object], name: str) -> dict[str, object] | None:
-    if name not in parent:
-        return None
+    if name not in parent: return None
     table = parent[name]
-    if isinstance(table, dict):
-        return table
+    if isinstance(table, dict): return table
     raise ConfigError(f"{name}: expected table")
 
 
 def _required_str(parent: dict[str, object], key: str, field_name: str) -> str:
-    if key not in parent:
-        raise ConfigError(f"missing required field: {field_name}")
+    if key not in parent: raise ConfigError(f"missing required field: {field_name}")
     value = parent[key]
-    if not isinstance(value, str):
-        raise ConfigError(f"{field_name}: expected string")
+    if not isinstance(value, str): raise ConfigError(f"{field_name}: expected string")
     return value
 
 
 def _required_bool(parent: dict[str, object], key: str, field_name: str) -> bool:
-    if key not in parent:
-        raise ConfigError(f"missing required field: {field_name}")
+    if key not in parent: raise ConfigError(f"missing required field: {field_name}")
     value = parent[key]
-    if not isinstance(value, bool):
-        raise ConfigError(f"{field_name}: expected boolean")
+    if not isinstance(value, bool): raise ConfigError(f"{field_name}: expected boolean")
     return value
 
 
 def _positive_float(value: object, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ConfigError(f"{field_name}: expected positive number")
+    if isinstance(value, bool) or not isinstance(value, int | float): raise ConfigError(f"{field_name}: expected positive number")
     parsed = float(value)
-    if parsed <= 0:
-        raise ConfigError(f"{field_name}: expected positive number")
+    if parsed <= 0: raise ConfigError(f"{field_name}: expected positive number")
     return parsed
 
 
-def _parse_hex_bytes(value: str, length: int, field_name: str) -> bytes:
+def _parse_hex_bytes(
+    value: str,
+    length: int, # expected byte count after decoding
+    field_name: str, # dotted name used in error messages
+) -> bytes:
     cleaned = value.replace(" ", "").lower()
     try:
         raw = bytes.fromhex(cleaned)

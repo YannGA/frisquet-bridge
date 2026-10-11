@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
+import argparse, asyncio
 
 from frisquet_bridge.cli.options import add_logging_options
 from frisquet_bridge.config import ConfigError, load
@@ -36,7 +35,11 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _send(config_path: str, temperature: float, raw_recorder: RawMessageRecorder | None = None) -> None:
+async def _send(
+    config_path: str, # config file path
+    temperature: float, # outside temperature in °C
+    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+) -> None:
     cfg = load(config_path)
     if cfg.sonde is None:
         raise ConfigError("outside-temp requires [frisquet.sonde]")

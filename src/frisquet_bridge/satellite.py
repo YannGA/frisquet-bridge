@@ -10,8 +10,7 @@ HA climate entity.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import asyncio, contextlib
 from collections.abc import Awaitable, Callable
 
 import structlog
@@ -27,20 +26,24 @@ log = structlog.get_logger(__name__)
 # every 10 minutes so the boiler keeps the zone alive.
 CONSIGNE_INTERVAL = 600.0
 
+# Consigne builders for the profiles whose setpoint comes from boiler demand
+# rather than from the HA climate entity.
+_CONSIGNE_BY_PROFILE = {"central_boiler": central_boiler_consigne, "simple_satellite": simple_consigne}
+
 
 class VirtualSatellite:
     """Periodically reports a zone's ambient/setpoint/mode to the boiler."""
 
     def __init__(
         self,
-        zone: int,
-        ops: BoilerOps,
-        data: BoilerData,
+        zone: int, # zone number this satellite owns
+        ops: BoilerOps, # ops used to send the consigne
+        data: BoilerData, # shared data model
         *,
-        interval: float = CONSIGNE_INTERVAL,
-        connect_compat: bool = False,
-        profile: str = "virtual_satellite",
-        on_update: Callable[[], Awaitable[None]] | None = None,
+        interval: float = CONSIGNE_INTERVAL, # seconds between periodic sends
+        connect_compat: bool = False, # encode modes the way the official Connect app does
+        profile: str = "virtual_satellite", # consigne profile: virtual_satellite, central_boiler or simple_satellite
+        on_update: Callable[[], Awaitable[None]] | None = None, # callback invoked after each send attempt
     ) -> None:
         self._zone = zone
         self._ops = ops
@@ -73,17 +76,14 @@ class VirtualSatellite:
 
     async def _send_once(self) -> bool:
         zs = self._data.zones[self._zone]
-        if self._profile == "central_boiler":
-            consigne = central_boiler_consigne(zs)
-            ambient = consigne.ambient if consigne is not None else None
-            setpoint = consigne.setpoint if consigne is not None else None
-        elif self._profile == "simple_satellite":
-            consigne = simple_consigne(zs)
-            ambient = consigne.ambient if consigne is not None else None
-            setpoint = consigne.setpoint if consigne is not None else None
-        else:
+        consigne_fn = _CONSIGNE_BY_PROFILE.get(self._profile)
+        if consigne_fn is None:
             ambient = zs.reported_ambient if zs.reported_ambient is not None else zs.ambient_temperature
             setpoint = zone_target_temperature(zs)
+        else:
+            consigne = consigne_fn(zs)
+            ambient = consigne.ambient if consigne is not None else None
+            setpoint = consigne.setpoint if consigne is not None else None
         if ambient is None or zs.mode is None or setpoint is None:
             log.debug(
                 "virtual_satellite_skip",
@@ -102,11 +102,10 @@ class VirtualSatellite:
                 setpoint=setpoint,
                 connect_compat=self._connect_compat,
             )
+            sent = True
         except Exception:
             log.exception("virtual_satellite_send_failed", zone=self._zone)
             sent = False
-        else:
-            sent = True
         if self._on_update is not None:
             await self._on_update()
         return sent

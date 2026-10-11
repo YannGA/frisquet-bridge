@@ -7,10 +7,7 @@ pyserial is blocking, so a dedicated daemon reader thread does blocking
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import secrets
-import threading
+import asyncio, contextlib, secrets, threading
 from collections.abc import AsyncIterator
 
 import serial
@@ -37,11 +34,11 @@ _COMMAND_TIMEOUT = 3.0
 class SerialTransport(Transport):
     def __init__(
         self,
-        port: str,
-        baud: int = 115200,
+        port: str, # serial device path, e.g. /dev/ttyACM0
+        baud: int = 115200, # line speed, fixed by the firmware
         *,
-        command_timeout: float = _COMMAND_TIMEOUT,
-        raw_recorder: RawMessageRecorder | None = None,
+        command_timeout: float = _COMMAND_TIMEOUT, # seconds to await OK/ERR/PONG
+        raw_recorder: RawMessageRecorder | None = None, # optional raw-traffic JSONL recorder
     ) -> None:
         self._port = port
         self._baud = baud
@@ -59,8 +56,6 @@ class SerialTransport(Transport):
         self._pending: tuple[int, str, asyncio.Future[None]] | None = None
         self._next_seq = secrets.randbits(32)
         self._subscribers: set[asyncio.Queue[ReceivedFrame]] = set()
-
-    # -- lifecycle ---------------------------------------------------------
 
     async def open(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -85,8 +80,6 @@ class SerialTransport(Transport):
             self._serial = None
         log.info("serial_closed", port=self._port)
 
-    # -- reader thread -----------------------------------------------------
-
     def _read_loop(self) -> None:
         assert self._serial is not None
         assert self._loop is not None
@@ -94,14 +87,12 @@ class SerialTransport(Transport):
             try:
                 raw = self._serial.readline()
             except (serial.SerialException, OSError) as exc:
-                if self._closing:
-                    break
+                if self._closing: break
                 log.exception("serial_read_failed")
                 error = TransportError(f"serial reader failed: {exc}")
                 self._loop.call_soon_threadsafe(self._report_failure, error)
                 break
-            if not raw:
-                continue
+            if not raw: continue
             line = raw.decode("ascii", errors="replace").strip()
             if line:
                 if self._raw_recorder is not None:
@@ -123,8 +114,7 @@ class SerialTransport(Transport):
         raise self._failure_error
 
     def _handle_line(self, line: str) -> None:
-        if line == "HB":
-            return
+        if line == "HB": return
 
         rx = parse_rx(line)
         if rx is not None:
@@ -184,7 +174,12 @@ class SerialTransport(Transport):
         for queue in self._subscribers:
             queue.put_nowait(received)
 
-    def _resolve_pending(self, seq: int, kind: str, error: Exception | None) -> None:
+    def _resolve_pending(
+        self,
+        seq: int, # sequence echoed by the modem reply
+        kind: str, # reply kind received (OK/ERR/PONG)
+        error: Exception | None, # error to fail the future with, or None on success
+    ) -> None:
         pending = self._pending
         if pending is None or pending[0] != seq:
             log.debug("unmatched_modem_reply", seq=seq, kind=kind)
@@ -194,18 +189,19 @@ class SerialTransport(Transport):
             log.debug("unexpected_modem_reply", seq=seq, kind=kind, expected=expected_kind)
             return
         fut = pending[2]
-        if fut.done():
-            return
+        if fut.done(): return
         if error is None:
             fut.set_result(None)
         else:
             fut.set_exception(error)
 
-    # -- commands ----------------------------------------------------------
-
-    async def _command(self, line: str, *, expected_kind: str = "OK") -> None:
-        if self._serial is None:
-            raise TransportError("transport not open")
+    async def _command(
+        self,
+        line: str, # modem command without the sequence token or CRC
+        *,
+        expected_kind: str = "OK", # reply kind that resolves this command
+    ) -> None:
+        if self._serial is None: raise TransportError("transport not open")
         loop = asyncio.get_running_loop()
         async with self._cmd_lock:
             seq = self._next_seq
@@ -264,8 +260,6 @@ class SerialTransport(Transport):
 
     async def sleep(self) -> None:
         await self._command("SLEEP")
-
-    # -- receive -----------------------------------------------------------
 
     @contextlib.asynccontextmanager
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[ReceivedFrame]]:

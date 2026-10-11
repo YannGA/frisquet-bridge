@@ -100,10 +100,8 @@ class Frame:
 
     @classmethod
     def decode(cls, raw: bytes) -> Frame:
-        if len(raw) < HEADER_LEN:
-            raise FrameError(f"frame too short: {len(raw)} bytes")
+        if len(raw) < HEADER_LEN: raise FrameError(f"frame too short: {len(raw)} bytes")
         length, to_addr, from_addr, assoc, req_id, control, msg_type = raw[:HEADER_LEN]
-        # length counts everything after the length byte itself.
         expected = length + 1
         if len(raw) < expected:
             raise FrameError(f"truncated frame: length={length} implies {expected} bytes, got {len(raw)}")
@@ -128,10 +126,10 @@ class Frame:
     def matches(
         self,
         *,
-        from_addr: int,
-        to_addr: int,
-        association_id: int,
-        request_id: int,
+        from_addr: int, # source address the response must carry
+        to_addr: int, # destination address the response must carry
+        association_id: int, # association id the response must carry
+        request_id: int, # request id the response must carry
     ) -> bool:
         """True if this frame is the response identified by these fields."""
         return (

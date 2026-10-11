@@ -18,8 +18,6 @@ class ProtocolState:
     on_change: Callable[[ProtocolState], None] | None = field(default=None, repr=False, compare=False)
 
     def next_request_id(self) -> int:
-        # Matches frisquet-connect: increment by 4, wrapping at 256.
         self.request_id = (self.request_id + 4) & 0xFF
-        if self.on_change is not None:
-            self.on_change(self)
+        if self.on_change is not None: self.on_change(self)
         return self.request_id

@@ -46,11 +46,11 @@ def simple_target_temperature(zone: ZoneState) -> float | None:
 
 
 def apply_simple_command(
-    zone: ZoneState,
+    zone: ZoneState, # zone to mutate in place
     *,
-    hvac_mode: str | None = None,
-    preset: str | None = None,
-    target_temperature: float | None = None,
+    hvac_mode: str | None = None, # "off"/"heat" command, or None to leave the mode
+    preset: str | None = None, # comfort/eco command, or None to leave the preset
+    target_temperature: float | None = None, # setpoint to store for the resulting mode
 ) -> None:
     mode = _simple_mode(zone)
     if hvac_mode is not None:
@@ -91,8 +91,7 @@ def simple_consigne(zone: ZoneState) -> Consigne | None:
     setpoint = simple_target_temperature(zone)
     if ambient is None or setpoint is None:
         return None
-    mode = _simple_mode(zone)
-    zone.mode = mode
+    zone.mode = _simple_mode(zone)
     zone.boost = False
     zone.override = False
     zone.auto_comfort = None

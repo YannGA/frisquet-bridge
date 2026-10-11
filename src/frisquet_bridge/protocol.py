@@ -6,8 +6,7 @@ with the Feather modem. The RF frame model lives in `frame.py`.
 
 from __future__ import annotations
 
-import glob
-import re
+import glob, re
 from dataclasses import dataclass
 
 # Modem -> host line matchers.
@@ -22,8 +21,7 @@ READY_RE = re.compile(r"^READY (\S+) (\S+)$")
 def crc8(data: bytes) -> int:
     """XOR-based CRC8 over the ASCII bytes, matching the firmware."""
     c = 0
-    for b in data:
-        c ^= b
+    for b in data: c ^= b
     return c
 
 
@@ -36,12 +34,9 @@ def format_cmd(line: str) -> str:
 def verify_crc(line: str) -> bool:
     """Check the trailing ` <crc>` token of a received line."""
     head, _, crc = line.rpartition(" ")
-    if not head or len(crc) != 2:
-        return False
-    try:
-        expected = int(crc, 16)
-    except ValueError:
-        return False
+    if not head or len(crc) != 2: return False
+    try: expected = int(crc, 16)
+    except ValueError: return False
     return crc8(head.encode("ascii")) == expected
 
 
@@ -54,8 +49,7 @@ class RxLine:
 def parse_rx(line: str) -> RxLine | None:
     """Parse an `RX <rssi> <hex> <crc>` line (CRC already validated upstream)."""
     m = RX_RE.match(line)
-    if not m:
-        return None
+    if not m: return None
     return RxLine(rssi=int(m.group(1)), frame_hex=m.group(2))
 
 

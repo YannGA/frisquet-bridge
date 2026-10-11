@@ -8,8 +8,7 @@ different link later) without touching the protocol layer.
 
 from __future__ import annotations
 
-import abc
-import asyncio
+import abc, asyncio
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass

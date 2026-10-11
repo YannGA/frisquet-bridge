@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import time
+import json, time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -45,8 +44,7 @@ DHW_PENDING_SECONDS = 20.0
 
 MQTT_PRESET_MODES = tuple(preset for preset in PRESET_MODES if preset != PRESET_BOOST)
 
-# Entities intentionally absent from the current MQTT surface; clear retained
-# discovery so Home Assistant removes them after earlier runs.
+# Retired from the MQTT surface; clear their retained discovery so Home Assistant drops them.
 _RETIRED_ZONE_ENTITIES: tuple[tuple[str, str], ...] = tuple(
     (component, f"zone{zone}_{suffix}")
     for zone in (1, 2, 3)
@@ -299,15 +297,15 @@ class MqttAdapter:
 
     def __init__(
         self,
-        cfg: BridgeConfig,
-        data: BoilerData,
-        ops: BoilerOps | None,
+        cfg: BridgeConfig, # bridge configuration
+        data: BoilerData, # live boiler, zone and RF state
+        ops: BoilerOps | None, # connect ops for boiler/zone writes, if paired
         *,
-        sonde_ops: BoilerOps | None = None,
-        outside_temperature_writer: Callable[[float], Awaitable[bool]] | None = None,
-        virtual_satellites: dict[int, VirtualSatellite] | None = None,
-        on_state_change: Callable[[], Awaitable[None]] | None = None,
-        on_persist_state: Callable[[], None] | None = None,
+        sonde_ops: BoilerOps | None = None, # connect ops for the outside sensor, if paired
+        outside_temperature_writer: Callable[[float], Awaitable[bool]] | None = None, # alternative outside-sensor writer
+        virtual_satellites: dict[int, VirtualSatellite] | None = None, # virtual zone -> satellite
+        on_state_change: Callable[[], Awaitable[None]] | None = None, # republish state after a change
+        on_persist_state: Callable[[], None] | None = None, # persist state after a change
     ) -> None:
         self._cfg = cfg
         self._data = data
@@ -341,8 +339,7 @@ class MqttAdapter:
         return _DHW_LABELS.get(self._cfg.mqtt.language, _DHW_LABELS["en"])[mode]
 
     def _boiler_status_label(self, status: BoilerStatus | None) -> str | None:
-        if status is None:
-            return None
+        if status is None: return None
         return _BOILER_STATUS_LABELS.get(self._cfg.mqtt.language, _BOILER_STATUS_LABELS["en"])[status]
 
     def _device_block(self) -> dict[str, Any]:
@@ -423,19 +420,23 @@ class MqttAdapter:
 
     async def _publish_discovery_payload(
         self,
-        client: aiomqtt.Client,
-        component: str,
-        entity_id: str,
-        payload: dict[str, Any],
+        client: aiomqtt.Client, # client to publish through
+        component: str, # HA component, e.g. "sensor"
+        entity_id: str, # entity id under the component
+        payload: dict[str, Any], # discovery config payload
     ) -> bool:
         key = f"{component}.{entity_id}"
-        if key in self._published:
-            return False
+        if key in self._published: return False
         await client.publish(self._discovery_topic(component, entity_id), json.dumps(payload), retain=True)
         self._published.add(key)
         return True
 
-    async def _clear_discovery(self, client: aiomqtt.Client, component: str, entity_id: str) -> None:
+    async def _clear_discovery(
+        self,
+        client: aiomqtt.Client, # client to publish through
+        component: str, # HA component
+        entity_id: str, # entity id under the component
+    ) -> None:
         await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
 
     async def _publish_central_discovery(self, client: aiomqtt.Client) -> int:
@@ -549,8 +550,7 @@ class MqttAdapter:
         published_count = 0
         for spec in specs:
             key = f"{spec.component}.{spec.entity_id}"
-            if key in self._published:
-                continue
+            if key in self._published: continue
             payload = self._base_discovery_payload(spec)
             await client.publish(self._discovery_topic(spec.component, spec.entity_id), json.dumps(payload), retain=True)
             self._published.add(key)
@@ -558,7 +558,6 @@ class MqttAdapter:
         if not self._boiler_entities_enabled():
             for spec in BOILER_SENSOR_ENTITIES:
                 await self._clear_discovery(client, spec.component, spec.entity_id)
-        if not self._boiler_entities_enabled():
             await self._clear_discovery(client, DHW_MODE_ENTITY.component, DHW_MODE_ENTITY.entity_id)
             await self._clear_discovery(client, DHW_MODE_SENSOR_ENTITY.component, DHW_MODE_SENSOR_ENTITY.entity_id)
         elif self._boiler_commands_enabled():
@@ -567,8 +566,7 @@ class MqttAdapter:
             await self._clear_discovery(client, DHW_MODE_ENTITY.component, DHW_MODE_ENTITY.entity_id)
 
         for zone in (1, 2, 3):
-            if not self._cfg.zone_enabled(zone):
-                continue
+            if not self._cfg.zone_enabled(zone): continue
             published_count += await self._publish_zone_flow_discovery(client, zone)
             if self._is_central_zone(zone):
                 published_count += await self._publish_central_discovery(client)
@@ -678,8 +676,7 @@ class MqttAdapter:
         if self._cfg.sonde is not None and self._cfg.sonde.enabled:
             mapping["outsideSensor/outsideTemperature"] = _fmt(self._data.sonde.outside_temperature)
         for zone, state in self._data.zones.items():
-            if not self._cfg.zone_enabled(zone):
-                continue
+            if not self._cfg.zone_enabled(zone): continue
             prefix = f"z{zone}"
             mapping[f"{prefix}/flowTemperature"] = _fmt(state.flow_temperature)
             mapping[f"{prefix}/flowSetpointTemperature"] = _fmt(state.flow_setpoint_temperature)
@@ -811,7 +808,12 @@ class MqttAdapter:
             if self._on_change:
                 await self._on_change()
 
-    async def handle_message(self, client: aiomqtt.Client, topic: str, payload: str) -> None:
+    async def handle_message(
+        self,
+        client: aiomqtt.Client, # client to publish through
+        topic: str, # MQTT topic the message arrived on
+        payload: str, # raw message body
+    ) -> None:
         body = payload.strip()
         if topic == "homeassistant/status":
             if body == "online":
@@ -844,7 +846,12 @@ class MqttAdapter:
         if satellite is not None:
             await satellite.send_now()
 
-    async def _handle_connect_zone_command(self, zone: int, command: str, payload: str) -> None:
+    async def _handle_connect_zone_command(
+        self,
+        zone: int, # zone number (1-3)
+        command: str, # mode, preset or targetTemperature
+        payload: str, # raw command value
+    ) -> None:
         assert self._ops is not None
         if command == "mode":
             await self._ops.apply_zone_climate(zone, self._data, hvac_mode=payload)
@@ -855,7 +862,12 @@ class MqttAdapter:
         else:
             log.warning("mqtt_command_ignored", zone=zone, command=command)
 
-    async def _handle_virtual_zone_command(self, zone: int, command: str, payload: str) -> None:
+    async def _handle_virtual_zone_command(
+        self,
+        zone: int, # zone number (1-3)
+        command: str, # mode, preset, targetTemperature or reportedAmbient
+        payload: str, # raw command value
+    ) -> None:
         satellite = self._virtual[zone]
         zs = self._data.zones[zone]
         if command == "reportedAmbient":
@@ -882,8 +894,7 @@ class MqttAdapter:
         await satellite.send_now()
 
     def _persist_state(self) -> None:
-        if self._on_persist_state is not None:
-            self._on_persist_state()
+        if self._on_persist_state is not None: self._on_persist_state()
 
     def _visible_dhw_mode(self) -> DhwMode | None:
         if self._pending_dhw_mode is None:
@@ -896,8 +907,7 @@ class MqttAdapter:
 
     def _central_command(self, topic: str) -> str | None:
         prefix = f"{self._base}/"
-        if not topic.startswith(prefix):
-            return None
+        if not topic.startswith(prefix): return None
         parts = topic[len(prefix) :].split("/")
         if len(parts) != 3 or parts[0] != "central" or parts[2] != "set":
             return None
@@ -907,8 +917,7 @@ class MqttAdapter:
 
     def _zone_command(self, topic: str) -> tuple[int, str] | None:
         prefix = f"{self._base}/"
-        if not topic.startswith(prefix):
-            return None
+        if not topic.startswith(prefix): return None
         parts = topic[len(prefix) :].split("/")
         if len(parts) != 3 or parts[2] != "set":
             return None

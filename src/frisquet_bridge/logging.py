@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import logging
-import sys
+import json, logging, sys
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -21,11 +19,11 @@ class RawMessageRecorder:
 
     def __init__(
         self,
-        path: str,
+        path: str, # JSONL file to append to (rotated in place)
         *,
-        max_bytes: int,
-        backup_count: int,
-        include_lines: bool = False,
+        max_bytes: int, # rotate once the active file exceeds this many bytes
+        backup_count: int, # number of rotated backups to keep
+        include_lines: bool = False, # also record raw serial lines, not just frames
     ) -> None:
         self.include_lines = include_lines
         log_path = Path(path)
@@ -52,17 +50,16 @@ class RawMessageRecorder:
         self._logger.info(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
 
     def record_line(self, direction: str, line: str) -> None:
-        if self.include_lines:
-            self.record("serial_line", direction=direction, line=line)
+        if self.include_lines: self.record("serial_line", direction=direction, line=line)
 
     def record_frame(
         self,
-        direction: str,
-        frame: Frame,
-        raw: bytes,
+        direction: str, # "tx" or "rx"
+        frame: Frame, # frame to describe
+        raw: bytes, # exact bytes on the wire
         *,
-        rssi: int | None = None,
-        outcome: str | None = None,
+        rssi: int | None = None, # signal strength, on received frames only
+        outcome: str | None = None, # e.g. "attempt", "acked"
     ) -> None:
         fields: dict[str, object] = {
             "direction": direction,
@@ -88,12 +85,12 @@ class RawMessageRecorder:
 
 
 def configure_logging(
-    config: LoggingConfig,
+    config: LoggingConfig, # base logging configuration
     *,
-    level: str | None = None,
-    log_format: str | None = None,
-    log_file: str | None = None,
-    raw_log_file: str | None = None,
+    level: str | None = None, # override for config.level
+    log_format: str | None = None, # override for config.format (json or console)
+    log_file: str | None = None, # override for config.file
+    raw_log_file: str | None = None, # override for config.raw_file
 ) -> RawMessageRecorder | None:
     """Configure application logging and return an optional raw recorder."""
 

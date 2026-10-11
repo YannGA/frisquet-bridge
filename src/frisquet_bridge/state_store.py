@@ -114,22 +114,26 @@ def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
         zone.schedule = ZoneSchedule.decode(bytes.fromhex(schedule))
 
 
-def save_zone_state(path: Path, data: BoilerData) -> None:
+def save_zone_state(
+    path: Path, # sidecar file to write
+    data: BoilerData, # zones to persist
+) -> None:
     """Atomically persist any learned zone metadata to ``path``."""
     try:
         payload = _load_payload(path)
         for n, zs in data.zones.items():
             zone = _serialize_zone(zs)
-            if zone is None:
-                payload.pop(str(n), None)
-            else:
-                payload[str(n)] = zone
+            if zone is None: payload.pop(str(n), None)
+            else: payload[str(n)] = zone
         _write_payload(path, payload)
     except OSError as exc:
         log.warning("zone_state_save_failed", path=str(path), error=str(exc))
 
 
-def load_zone_state(path: Path, data: BoilerData) -> None:
+def load_zone_state(
+    path: Path, # sidecar file to read
+    data: BoilerData, # zones to populate in place
+) -> None:
     """Populate ``data`` with previously-learned zone metadata, if present."""
     payload = _load_payload(path)
     loaded = []
@@ -160,7 +164,11 @@ def load_protocol_request_ids(path: Path) -> dict[str, int]:
     return request_ids
 
 
-def save_protocol_request_id(path: Path, role: str, request_id: int) -> None:
+def save_protocol_request_id(
+    path: Path, # sidecar file to write
+    role: str, # "connect", "sonde" or "satellite_z1".."satellite_z3"
+    request_id: int, # stored masked to one byte
+) -> None:
     try:
         payload = _load_payload(path)
         protocol = payload.setdefault(PROTOCOL_KEY, {})

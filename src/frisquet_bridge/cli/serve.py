@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
-import signal
+import argparse, asyncio, signal
 
 from frisquet_bridge.cli.options import add_logging_options
 from frisquet_bridge.config import BridgeConfig, load
@@ -28,7 +26,10 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _serve(cfg: BridgeConfig, raw_recorder: RawMessageRecorder | None) -> None:
+async def _serve(
+    cfg: BridgeConfig, # loaded bridge configuration
+    raw_recorder: RawMessageRecorder | None, # sink for raw serial lines
+) -> None:
     service = BridgeService(cfg, raw_recorder=raw_recorder)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

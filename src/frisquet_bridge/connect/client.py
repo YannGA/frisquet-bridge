@@ -40,13 +40,17 @@ class Association:
 class AddressNotFound(TransportError):
     """The boiler rejected a matching operation because its address is unknown."""
 
-    def __init__(self, *, request_msg_type: int, request_payload: bytes, response: Frame) -> None:
+    def __init__(
+        self,
+        *,
+        request_msg_type: int, # message type of the rejected request
+        request_payload: bytes, # payload of the rejected request
+        response: Frame, # the boiler's NACK frame
+    ) -> None:
         self.request_msg_type = request_msg_type
         self.request_payload = request_payload
         self.response = response
-        super().__init__(
-            f"address not found for message 0x{request_msg_type:02x} payload {request_payload.hex()}"
-        )
+        super().__init__(f"address not found for message 0x{request_msg_type:02x} payload {request_payload.hex()}")
 
 
 class RequestTimeout(TransportError):
@@ -58,12 +62,12 @@ class FrisquetClient:
 
     def __init__(
         self,
-        transport: Transport,
-        state: ProtocolState,
+        transport: Transport, # transport used to send and receive raw frames
+        state: ProtocolState, # shared protocol ids (network / association / request)
         *,
-        self_addr: int = ADDR_CONNECT,
-        boiler_addr: int = ADDR_BOILER,
-        lock: asyncio.Lock | None = None,
+        self_addr: int = ADDR_CONNECT, # source address Connect transmits from
+        boiler_addr: int = ADDR_BOILER, # destination address of the boiler
+        lock: asyncio.Lock | None = None, # serialise exchanges across clients sharing one modem
     ) -> None:
         self._transport = transport
         self._state = state
@@ -94,21 +98,20 @@ class FrisquetClient:
 
     def _record_attempt_outcome(self, outcome: str, rssi: int | None = None) -> None:
         callback = self._attempt_outcome_callback.get()
-        if callback is not None:
-            callback(outcome, rssi)
+        if callback is not None: callback(outcome, rssi)
 
     async def request(
         self,
         *,
-        control: int,
-        msg_type: int,
-        payload: bytes,
-        from_addr: int | None = None,
-        to_addr: int | None = None,
-        timeout: float = _DEFAULT_TIMEOUT,
-        retries: int = _DEFAULT_RETRIES,
-        burst: int = 1,
-        burst_interval: float = 0.0,
+        control: int, # RF control byte
+        msg_type: int, # message type to send
+        payload: bytes, # message payload
+        from_addr: int | None = None, # source address (defaults to self_addr)
+        to_addr: int | None = None, # destination address (defaults to boiler_addr)
+        timeout: float = _DEFAULT_TIMEOUT, # seconds to wait for each response
+        retries: int = _DEFAULT_RETRIES, # number of request attempts
+        burst: int = 1, # identical frames sent per attempt
+        burst_interval: float = 0.0, # seconds between frames of a burst
     ) -> Frame:
         """Send a frame and await the boiler's matching response.
 
@@ -140,15 +143,15 @@ class FrisquetClient:
     async def _request_locked(
         self,
         *,
-        control: int,
-        msg_type: int,
-        payload: bytes,
-        from_addr: int,
-        to_addr: int,
-        timeout: float,
-        retries: int,
-        burst: int = 1,
-        burst_interval: float = 0.0,
+        control: int, # RF control byte
+        msg_type: int, # message type to send
+        payload: bytes, # message payload
+        from_addr: int, # source address
+        to_addr: int, # destination address
+        timeout: float, # seconds to wait for each response
+        retries: int, # number of request attempts
+        burst: int = 1, # identical frames sent per attempt
+        burst_interval: float = 0.0, # seconds between frames of a burst
     ) -> Frame:
         await self._transport.set_network_id(self._state.network_id)
 
@@ -165,7 +168,6 @@ class FrisquetClient:
                     msg_type=msg_type,
                     payload=payload,
                 )
-                # Drain any frames buffered before this attempt.
                 _drain(queue)
                 try:
                     for index in range(max(1, burst)):
@@ -235,14 +237,14 @@ class FrisquetClient:
     async def send_oneway(
         self,
         *,
-        control: int,
-        msg_type: int,
-        payload: bytes,
-        from_addr: int | None = None,
-        to_addr: int | None = None,
-        repeats: int = 1,
-        interval: float = 0.0,
-        on_attempt_outcome: Callable[[str, int | None], None] | None = None,
+        control: int, # RF control byte
+        msg_type: int, # message type to send
+        payload: bytes, # message payload
+        from_addr: int | None = None, # source address (defaults to self_addr)
+        to_addr: int | None = None, # destination address (defaults to boiler_addr)
+        repeats: int = 1, # times to (re)send the frame
+        interval: float = 0.0, # seconds between repeat sends
+        on_attempt_outcome: Callable[[str, int | None], None] | None = None, # per-send outcome observer
     ) -> None:
         """Transmit a frame without awaiting a response (fire-and-forget).
 
@@ -274,48 +276,43 @@ class FrisquetClient:
                     )
                     await self._transport.send(frame)
                 except TransportError:
-                    if on_attempt_outcome is not None:
-                        on_attempt_outcome("transport_failure", None)
+                    if on_attempt_outcome is not None: on_attempt_outcome("transport_failure", None)
                     raise
-                if on_attempt_outcome is not None:
-                    on_attempt_outcome("success", None)
+                if on_attempt_outcome is not None: on_attempt_outcome("success", None)
             if interval > 0 and index + 1 < repeats:
                 await asyncio.sleep(interval)
 
-    async def read_memory(self, address: int, size: int, **kwargs: object) -> bytes:
+    async def read_memory(
+        self,
+        address: int, # memory address to read
+        size: int, # bytes to read
+        **kwargs: object # extra FrisquetClient.request options
+    ) -> bytes:
         """READ ``size`` bytes at ``address``; returns the response payload."""
         payload = address.to_bytes(2, "big") + size.to_bytes(2, "big")
-        response = await self.request(
-            control=0x01,
-            msg_type=MSG_READ,
-            payload=payload,
-            **kwargs,  # type: ignore[arg-type]
-        )
+        response = await self.request(control=0x01, msg_type=MSG_READ, payload=payload, **kwargs)  # type: ignore[arg-type]
         return response.payload
 
     async def _await_match(
         self,
-        queue: asyncio.Queue,
+        queue: asyncio.Queue, # frames received on the transport subscription
         *,
-        from_addr: int,
-        to_addr: int,
-        association_id: int,
-        request_id: int,
-        control: int,
-        msg_type: int,
-        request_payload: bytes,
-        timeout: float,
+        from_addr: int, # expected response source (the request's destination)
+        to_addr: int, # expected response destination
+        association_id: int, # expected association id
+        request_id: int, # expected request id
+        control: int, # request control byte, used to match an ACK or NACK
+        msg_type: int, # expected response message type
+        request_payload: bytes, # request payload, carried on AddressNotFound
+        timeout: float, # seconds to wait for a matching frame
     ) -> Frame | None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
             remaining = deadline - loop.time()
-            if remaining <= 0:
-                return None
-            try:
-                received = await asyncio.wait_for(queue.get(), remaining)
-            except TimeoutError:
-                return None
+            if remaining <= 0: return None
+            try: received = await asyncio.wait_for(queue.get(), remaining)
+            except TimeoutError: return None
             if not received.frame.matches(
                 from_addr=from_addr,
                 to_addr=to_addr,
@@ -349,26 +346,20 @@ class FrisquetClient:
             deadline = loop.time() + timeout
             while True:
                 remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise TransportError("network id recovery timed out (no broadcast)")
-                try:
-                    received = await asyncio.wait_for(queue.get(), remaining)
-                except TimeoutError:
-                    raise TransportError("network id recovery timed out (no broadcast)") from None
+                if remaining <= 0: raise TransportError("network id recovery timed out (no broadcast)")
+                try: received = await asyncio.wait_for(queue.get(), remaining)
+                except TimeoutError: raise TransportError("network id recovery timed out (no broadcast)") from None
                 frame = received.frame
-                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02:
-                    continue
-                if frame.to_addr != ADDR_BROADCAST or len(frame.payload) < 5:
-                    continue
+                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02: continue
+                if frame.to_addr != ADDR_BROADCAST or len(frame.payload) < 5: continue
                 network_id = frame.payload[1:5]
                 log.info("network_id_recovered", network_id=network_id.hex())
                 return network_id
 
     async def pair(
         self,
-        from_addr: int,
-        *,
-        listen_window: float = 5.0,
+        from_addr: int, # source address to reply from
+        *, listen_window: float = 5.0, # seconds of silence that end the listen
     ) -> Association:
         """Listen for the boiler's association broadcast and reply.
 
@@ -381,20 +372,15 @@ class FrisquetClient:
         result: Association | None = None
         async with self._transport.subscribe() as queue:
             while True:
-                try:
-                    received = await asyncio.wait_for(queue.get(), listen_window)
+                try: received = await asyncio.wait_for(queue.get(), listen_window)
                 except TimeoutError:
-                    if result is not None:
-                        return result
+                    if result is not None: return result
                     raise TransportError("pairing timed out (no broadcast)") from None
 
                 frame = received.frame
-                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02:
-                    continue
-                if frame.to_addr != ADDR_BROADCAST:
-                    continue
-                if len(frame.payload) < 5:
-                    continue
+                if frame.msg_type != MSG_ASSOCIATION or frame.control != 0x02: continue
+                if frame.to_addr != ADDR_BROADCAST: continue
+                if len(frame.payload) < 5: continue
 
                 network_id = frame.payload[1:5]
                 result = Association(
@@ -422,5 +408,4 @@ class FrisquetClient:
 
 
 def _drain(queue: asyncio.Queue) -> None:
-    while not queue.empty():
-        queue.get_nowait()
+    while not queue.empty(): queue.get_nowait()

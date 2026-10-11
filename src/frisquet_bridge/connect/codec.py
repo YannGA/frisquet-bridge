@@ -50,7 +50,7 @@ class BoilerDate:
 
     @classmethod
     def decode(cls, data: bytes) -> BoilerDate:
-        # data = [year, month, day, hour, minute, second, _, weekday] (BCD)
+        # BCD layout: [year, month, day, hour, minute, second, unused, weekday]
         return cls(
             year=2000 + _bcd(data[0]),
             month=_bcd(data[1]),

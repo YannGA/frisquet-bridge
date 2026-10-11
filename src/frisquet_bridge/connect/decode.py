@@ -6,7 +6,7 @@ import struct
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from frisquet_bridge.connect.codec import BoilerDate, decode_pressure16, decode_temp16
+from frisquet_bridge.connect.codec import BoilerDate, decode_pressure16, decode_temp16, decode_temp8
 from frisquet_bridge.model import (
     OUTSIDE_TEMP_ABSENT,
     BoilerData,
@@ -29,10 +29,10 @@ ADDR_DATE = 0xA02B
 ADDR_SATELLITE_INFO = 0xA029
 # Per-zone satellite setpoint block: zone 1 at 0xa02f, +5 per zone.
 ADDR_SATELLITE_CONSIGNE = 0xA02F
+ADDR_ZONE_CONFIG = 0xA154
 # 0xa0f0 is the holiday / derogation ("vacances") block. The boiler also pushes
 # it (with an empty date body) whenever a related program/manual/DHW change is
 # committed, so a zero body means "no holiday dates", not "holiday off command".
-ADDR_ZONE_CONFIG = 0xA154
 ADDR_HOLIDAY = 0xA0F0
 BOILER_ALT_OFFSET = 0xC8
 # Body marker / inner length byte seen at the start of the 0xa0f0 push body.
@@ -45,7 +45,11 @@ TEMP16_ABSENT = 127.0
 TEMP16_EXTREME_ABSENT = 258.1
 
 
-def memory_address(base: int, *, boiler_addr: int) -> int:
+def memory_address(
+    base: int, # base block address
+    *,
+    boiler_addr: int, # boiler address; 0x84 reads the alternate (BOILER_ALT_OFFSET) bank
+) -> int:
     return base + (BOILER_ALT_OFFSET if boiler_addr == 0x84 else 0)
 
 
@@ -63,8 +67,7 @@ def _temp16(data: bytes, offset: int) -> float | None:
 
 
 def _plausible(value: float | None, low: float, high: float) -> float | None:
-    if value is None:
-        return None
+    if value is None: return None
     return value if low <= value <= high else None
 
 
@@ -103,8 +106,7 @@ def decode_sensors(payload: bytes, data: BoilerData) -> None:
     data.zones[3].flow_setpoint_temperature = _plausible(_temp16(payload, 47), 0.0, 95.0)
 
     ext = _outside_temp16(payload, 55)
-    if ext is not None:
-        b.outside_temperature = ext
+    if ext is not None: b.outside_temperature = ext
 
 
 def decode_consumption(payload: bytes, data: BoilerData) -> None:
@@ -121,16 +123,19 @@ def decode_daily_consumption(payload: bytes, data: BoilerData) -> None:
     data.boiler.daily_heating_consumption = struct.unpack(">h", payload[21:23])[0]
 
 
-def decode_dhw_mode(payload: bytes, data: BoilerData, *, frame_bits: int | None = None) -> None:
+def decode_dhw_mode(
+    payload: bytes, # DHW mode block (0xa0fc)
+    data: BoilerData, # BoilerData to populate
+    *,
+    frame_bits: int | None = None, # override the frame bits instead of masking the payload
+) -> None:
     if not payload:
         raise ValueError(f"dhw mode payload too short: {len(payload)} bytes")
     raw = payload[2] if len(payload) >= 3 else payload[0]
     bits = raw & 0x81 if frame_bits is None else frame_bits
     data.boiler.dhw_frame_bits = bits
     mode = DhwMode.from_byte(raw)
-    if mode is not None:
-        data.boiler.dhw_mode = mode
-    data.boiler.dhw_frame_bits = bits
+    if mode is not None: data.boiler.dhw_mode = mode
 
 
 def decode_clock(payload: bytes, data: BoilerData) -> None:
@@ -162,7 +167,11 @@ def decode_satellite_init_response(payload: bytes, data: BoilerData) -> None:
     decode_satellite_info(body, data)
 
 
-def decode_zone_read(payload: bytes, zone: int, data: BoilerData) -> None:
+def decode_zone_read(
+    payload: bytes, # READ response or raw memory block
+    zone: int, # zone number to populate
+    data: BoilerData, # BoilerData to populate
+) -> None:
     """Decode zone config from a READ response or raw memory block."""
     for start in (0, 1, 2):
         if len(payload) - start < 48:
@@ -175,13 +184,15 @@ def decode_zone_read(payload: bytes, zone: int, data: BoilerData) -> None:
     decode_zone_init(payload, zone, data)
 
 
-def decode_zone_init(payload: bytes, zone: int, data: BoilerData) -> None:
+def decode_zone_init(
+    payload: bytes, # INIT (0xa154) frame or raw block
+    zone: int, # zone number to populate
+    data: BoilerData, # BoilerData to populate
+) -> None:
     """Decode a zone INIT (0xa154) into zone state."""
     body = _zone_init_body(payload)
     if len(body) < 6:
         return
-    from frisquet_bridge.connect.codec import decode_temp8
-
     zs = data.zones[zone]
     if zs.source == ZoneSource.VIRTUAL:
         return
@@ -192,8 +203,7 @@ def decode_zone_init(payload: bytes, zone: int, data: BoilerData) -> None:
     zs.reduced_temperature = decode_temp8(body[1])
     zs.frost_temperature = decode_temp8(body[2])
     mode = ZoneMode.from_byte(body[3])
-    if mode is not None:
-        zs.mode = mode
+    if mode is not None: zs.mode = mode
     zs.mode_options = mode_options
     if zs.mode == ZoneMode.AUTO:
         # Following the program sets the 0x10 bit; a fixed/derogation level uses
@@ -214,8 +224,7 @@ def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
         raise ValueError(f"satellite info payload too short: {len(payload)} bytes")
 
     ext = _outside_temp16(payload, 1)
-    if ext is not None:
-        data.boiler.outside_temperature = ext
+    if ext is not None: data.boiler.outside_temperature = ext
 
     date = BoilerDate.decode(payload[5:13])
     data.last_seen_date = date.isoformat()
@@ -226,7 +235,11 @@ def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
     _decode_satellite_zone(payload, data, zone=3, offset=33)
 
 
-def decode_zone_consigne(payload: bytes, zone: int, data: BoilerData) -> None:
+def decode_zone_consigne(
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    zone: int, # zone number to populate
+    data: BoilerData, # BoilerData to populate
+) -> None:
     """Decode a satellite's setpoint INIT (0xa02f write) into zone state.
 
     Mirrors OpenFrisquetVisio ``donneesSatellite_t``: a 9-byte INIT header
@@ -241,10 +254,8 @@ def decode_zone_consigne(payload: bytes, zone: int, data: BoilerData) -> None:
         return
     ambient = _temp16(body, 0)
     setpoint = _temp16(body, 2)
-    if ambient is not None:
-        zs.ambient_temperature = ambient
-    if setpoint is not None:
-        zs.setpoint_temperature = setpoint
+    if ambient is not None: zs.ambient_temperature = ambient
+    if setpoint is not None: zs.setpoint_temperature = setpoint
     _set_satellite_mode(body[5], zs)
 
 
@@ -257,7 +268,11 @@ _AUTO_SATELLITE_MODE = {
 }
 
 
-def encode_satellite_mode(zone: ZoneState, *, connect_compat: bool = False) -> int:
+def encode_satellite_mode(
+    zone: ZoneState, # ZoneState to encode
+    *,
+    connect_compat: bool = False, # XOR 0x20 to match the Connect-compatible encoding
+) -> int:
     """Encode zone mode for a satellite setpoint frame (see Satellite::getMode).
 
     Optionally XORs 0x20 to match the Connect-compatible encoding the boiler
@@ -287,7 +302,13 @@ def _zone_init_body(payload: bytes) -> bytes:
     return payload
 
 
-def _decode_satellite_zone(payload: bytes, data: BoilerData, *, zone: int, offset: int) -> None:
+def _decode_satellite_zone(
+    payload: bytes, # satellite info block
+    data: BoilerData, # BoilerData to populate
+    *,
+    zone: int, # zone number to populate
+    offset: int, # byte offset of this zone's block
+) -> None:
     zs = data.zones[zone]
     if zs.source != ZoneSource.SATELLITE:
         return
@@ -440,7 +461,12 @@ def decode_holiday_push(body: bytes, data: BoilerData) -> HolidayPush:
     return HolidayPush(active=active, start=start, end=end)
 
 
-def decode_memory_push(payload: bytes, data: BoilerData, *, boiler_addr: int = 0x80) -> MemoryPush:
+def decode_memory_push(
+    payload: bytes, # MEMORY_PUSH (0x10) payload
+    data: BoilerData, # BoilerData to update for known blocks
+    *,
+    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+) -> MemoryPush:
     """Parse a MEMORY_PUSH (0x10) and update ``data`` when the block is known."""
     push = parse_memory_push(payload)
     if push.address in memory_addrs(ADDR_HOLIDAY, boiler_addr):
@@ -455,7 +481,11 @@ def decode_boiler_event(payload: bytes, data: BoilerData) -> BoilerEventPush:
     return parse_boiler_event_push(payload)
 
 
-def memory_push_block_name(address: int, *, boiler_addr: int = 0x80) -> str | None:
+def memory_push_block_name(
+    address: int, # memory block address
+    *,
+    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+) -> str | None:
     if address in memory_addrs(ADDR_HOLIDAY, boiler_addr):
         return "holiday"
     if address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
@@ -463,7 +493,11 @@ def memory_push_block_name(address: int, *, boiler_addr: int = 0x80) -> str | No
     return None
 
 
-def describe_memory_push(payload: bytes, *, boiler_addr: int = 0x80) -> str:
+def describe_memory_push(
+    payload: bytes, # MEMORY_PUSH (0x10) payload
+    *,
+    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+) -> str:
     data = BoilerData()
     try:
         push = parse_memory_push(payload)

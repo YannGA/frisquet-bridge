@@ -5,7 +5,11 @@ from __future__ import annotations
 import argparse
 
 
-def add_logging_options(parser: argparse.ArgumentParser, *, suppress_default: bool = False) -> None:
+def add_logging_options(
+    parser: argparse.ArgumentParser, # parser to add the logging options to
+    *,
+    suppress_default: bool = False, # leave options unset so loaded config values survive
+) -> None:
     default = argparse.SUPPRESS if suppress_default else None
     parser.add_argument(
         "--log-level",

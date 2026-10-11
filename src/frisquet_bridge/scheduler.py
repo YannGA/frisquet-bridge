@@ -33,21 +33,21 @@ _UNCHANGED = object()
 class PollScheduler:
     def __init__(
         self,
-        ops: BoilerOps | None,
-        data: BoilerData,
+        ops: BoilerOps | None, # Connect ops for boiler reads, or None when unavailable
+        data: BoilerData, # aggregate state to populate
         *,
-        poll_connect: bool = True,
-        sonde_ops: BoilerOps | None = None,
-        push_outside_temperature: bool = False,
-        sensor_interval: float = SENSOR_INTERVAL,
-        poll_satellite_info: bool = True,
-        satellite_info_interval: float = SATELLITE_INFO_INTERVAL,
-        satellite_info_timeout: float = SATELLITE_INFO_TIMEOUT,
-        outside_temperature_interval: float = OUTSIDE_TEMPERATURE_INTERVAL,
-        outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL,
-        outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL,
-        enabled_zones: tuple[int, ...] = (1, 2, 3),
-        on_update: Callable[[], Awaitable[None]] | None = None,
+        poll_connect: bool = True, # whether to poll the boiler over Connect
+        sonde_ops: BoilerOps | None = None, # ops used to push the outside temperature
+        push_outside_temperature: bool = False, # whether to transmit outside-temperature changes
+        sensor_interval: float = SENSOR_INTERVAL, # seconds between sensor reads
+        poll_satellite_info: bool = True, # whether to re-read satellite info periodically
+        satellite_info_interval: float = SATELLITE_INFO_INTERVAL, # seconds between satellite-info reads
+        satellite_info_timeout: float = SATELLITE_INFO_TIMEOUT, # seconds to wait for a satellite-info reply
+        outside_temperature_interval: float = OUTSIDE_TEMPERATURE_INTERVAL, # keepalive interval for the outside temperature
+        outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL, # seconds before retrying a failed write
+        outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL, # min seconds between change-driven writes
+        enabled_zones: tuple[int, ...] = (1, 2, 3), # zone numbers whose state is logged
+        on_update: Callable[[], Awaitable[None]] | None = None, # callback awaited after every poll
     ) -> None:
         self._ops = ops
         self._data = data
@@ -85,31 +85,26 @@ class PollScheduler:
 
     async def _attempt_outside_temperature(
         self,
-        temperature: float | object = _UNCHANGED,
+        temperature: float | object = _UNCHANGED, # new temperature, or _UNCHANGED to transmit the stored one
         *,
-        only_if_due: bool = False,
-        is_change: bool = False,
+        only_if_due: bool = False, # skip the write unless its due time has passed
+        is_change: bool = False, # apply the minimum change interval to a user-driven change
     ) -> bool:
-        if self._sonde_ops is None:
-            return False
+        if self._sonde_ops is None: return False
         async with self._outside_temperature_lock:
             loop = asyncio.get_running_loop()
             now = loop.time()
-            if only_if_due and now < self._outside_temperature_due:
-                return False
+            if only_if_due and now < self._outside_temperature_due: return False
             if temperature is not _UNCHANGED:
                 self._data.sonde.outside_temperature = float(temperature)
             if is_change and self._outside_temperature_last_sent is not None:
                 earliest = self._outside_temperature_last_sent + self._outside_temperature_min_change_interval
                 if now < earliest:
-                    # Rate-limit change-driven sends: keep the newest value and
-                    # let the run loop transmit it at the earliest allowed slot.
                     self._outside_temperature_due = min(self._outside_temperature_due, earliest)
                     self._wake.set()
                     return False
             desired = self._data.sonde.outside_temperature
-            if desired is None:
-                return False
+            if desired is None: return False
             succeeded = await self._safe_poll(
                 "outside_temperature",
                 lambda: self._sonde_ops.write_outside_temperature(self._data, desired),
@@ -128,8 +123,7 @@ class PollScheduler:
 
         while not self._stop.is_set():
             self._wake.clear()
-            if self._stop.is_set():
-                break
+            if self._stop.is_set(): break
             now = loop.time()
             if self._poll_connect and self._ops is not None and now >= sensor_due:
                 await self._safe_poll("sensors", lambda: self._ops.read_sensors(self._data))
@@ -146,8 +140,7 @@ class PollScheduler:
                     ),
                 )
                 satellite_info_due = float("inf")
-                if self._poll_satellite_info:
-                    satellite_info_due = now + self._satellite_info_interval
+                if self._poll_satellite_info: satellite_info_due = now + self._satellite_info_interval
             if self._poll_connect and self._ops is not None and now >= slow_due:
                 await self._safe_poll("consumption", lambda: self._ops.read_consumption(self._data))
                 await self._safe_poll("daily_consumption", lambda: self._ops.read_daily_consumption(self._data))
@@ -172,7 +165,11 @@ class PollScheduler:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), timeout=sleep_for)
 
-    async def _safe_poll(self, name: str, fn: Callable[[], Awaitable[None]]) -> bool:
+    async def _safe_poll(
+        self,
+        name: str, # poll name used in logs
+        fn: Callable[[], Awaitable[None]], # coroutine factory performing the poll
+    ) -> bool:
         succeeded = False
         try:
             await fn()

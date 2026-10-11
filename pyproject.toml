@@ -39,7 +39,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "UP", "B", "SIM"]
-# Import layout is the coding conventions' business, not lint's: the conventions
-# prescribe combined single-line imports, which E401 bans and isort's I rules
-# split.
-ignore = ["E401"]
+# Layout and statement packing are the coding conventions' business, not lint's:
+# the conventions prescribe combined single-line imports and one-liner bodies,
+# which E401 and E701 ban.
+ignore = ["E401", "E701"]

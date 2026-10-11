@@ -11,15 +11,13 @@ HVAC_AUTO = "auto"
 HVAC_HEAT = "heat"
 HVAC_MODES = (HVAC_OFF, HVAC_AUTO, HVAC_HEAT)
 
-# "none" is Home Assistant's reserved preset (always offered for a climate
-# entity that advertises presets). We use it to mean "follow the weekly
-# program" with no derogation, which removes the redundant custom "schedule"
-# preset that used to sit next to HA's built-in "none".
+# HA reserves the "none" preset and always offers it, so we use it to mean
+# "follow the weekly program" with no derogation rather than a redundant custom one.
 PRESET_NONE = "none"
 PRESET_COMFORT = "comfort"
 PRESET_ECO = "eco"
 PRESET_BOOST = "boost"
-# Presets advertised to HA; it adds "none" itself, so we must not list it here.
+# We must not list "none" here: HA adds it itself.
 PRESET_MODES = (PRESET_COMFORT, PRESET_ECO, PRESET_BOOST)
 _VALID_PRESETS = (PRESET_NONE, *PRESET_MODES)
 
@@ -46,16 +44,14 @@ class ZoneIntent:
 def parse_hvac_mode(value: str) -> str:
     normalized = value.strip().casefold()
     if normalized not in HVAC_MODES:
-        choices = ", ".join(HVAC_MODES)
-        raise ClimateError(f"unknown hvac mode {value!r}; expected one of: {choices}")
+        raise ClimateError(f"unknown hvac mode {value!r}; expected one of: {', '.join(HVAC_MODES)}")
     return normalized
 
 
 def parse_preset(value: str) -> str:
     normalized = value.strip().casefold()
     if normalized not in _VALID_PRESETS:
-        choices = ", ".join(_VALID_PRESETS)
-        raise ClimateError(f"unknown preset {value!r}; expected one of: {choices}")
+        raise ClimateError(f"unknown preset {value!r}; expected one of: {', '.join(_VALID_PRESETS)}")
     return normalized
 
 
@@ -73,7 +69,6 @@ def zone_preset(zone: ZoneState) -> str | None:
     if zone.mode is None:
         return None
     if zone.mode == ZoneMode.FROST:
-        # HVAC mode is "off"; no derogation applies.
         return PRESET_NONE
     if zone.mode == ZoneMode.AUTO:
         # In auto we surface the level the program (or an active derogation) is
@@ -108,7 +103,10 @@ def _auto_active_preset(zone: ZoneState) -> str:
     return PRESET_NONE
 
 
-def zone_hvac_action(zone: ZoneState, boiler: BoilerState) -> str | None:
+def zone_hvac_action(
+    zone: ZoneState, # zone to classify
+    boiler: BoilerState, # fallback when the zone reports no ambient/setpoint
+) -> str | None:
     if zone.mode is None:
         return None
     if zone.mode == ZoneMode.FROST:
@@ -146,11 +144,11 @@ def zone_target_temperature(zone: ZoneState) -> float | None:
 
 
 def resolve_zone_intent(
-    zone: ZoneState,
+    zone: ZoneState, # current zone state seeding the defaults
     *,
-    hvac_mode: str | None = None,
-    preset: str | None = None,
-    target_temperature: float | None = None,
+    hvac_mode: str | None = None, # HA hvac command, or None to keep the zone's mode
+    preset: str | None = None, # HA preset command, or None to keep the zone's preset
+    target_temperature: float | None = None, # HA target, or None to leave setpoints untouched
 ) -> ZoneIntent:
     """Reconcile HA climate command(s) against current zone state."""
     current_hvac = zone_hvac_mode(zone) or HVAC_AUTO
@@ -210,9 +208,9 @@ def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
 
 
 def _resolve_mode_flags(
-    hvac: str,
-    preset: str,
-    zone: ZoneState,
+    hvac: str, # canonical hvac mode ("off"/"auto"/"heat")
+    preset: str, # canonical preset
+    zone: ZoneState, # current state, for an existing auto derogation
 ) -> tuple[ZoneMode, bool, bool, bool | None]:
     if hvac == HVAC_OFF:
         return ZoneMode.FROST, False, False, None
@@ -243,15 +241,15 @@ def _resolve_mode_flags(
 
 
 def _apply_target_temperature(
-    temperature: float,
+    temperature: float, # requested target, rounded to 0.1
     *,
-    mode: ZoneMode,
-    boost: bool,
-    override: bool,
-    auto_comfort: bool | None,
-    comfort: float | None,
-    reduced: float | None,
-    frost: float | None,
+    mode: ZoneMode, # resolved mode the target applies to
+    boost: bool, # whether the boost preset is active
+    override: bool, # whether an auto derogation is active
+    auto_comfort: bool | None, # derogated level in auto, or None
+    comfort: float | None, # current comfort setpoint
+    reduced: float | None, # current reduced setpoint
+    frost: float | None, # current frost setpoint
 ) -> tuple[float | None, float | None, float | None]:
     temp = round(float(temperature), 1)
     if mode == ZoneMode.FROST:

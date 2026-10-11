@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
+import argparse, asyncio
 
 from frisquet_bridge.cli.options import add_logging_options
 from frisquet_bridge.config import BridgeConfig, ConfigError, load
@@ -30,7 +29,10 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _read(config_path: str, raw_recorder: RawMessageRecorder | None = None) -> None:
+async def _read(
+    config_path: str, # config file path
+    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+) -> None:
     cfg = load(config_path)
     _require_connect_reader(cfg)
     state = ProtocolState(**cfg.protocol_state_kwargs("connect"))
@@ -86,7 +88,10 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
         raise ConfigError('read requires [frisquet.connect] mode = "read" or "full" with a paired identity')
 
 
-def _fmt(value: object, unit: str = "") -> str:
+def _fmt(
+    value: object, # value to render, floats get one decimal
+    unit: str = "", # suffix appended to the rendered value
+) -> str:
     if value is None:
         return "n/a"
     if isinstance(value, float):

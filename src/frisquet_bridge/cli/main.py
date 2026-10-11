@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import sys
+import argparse, sys
 from pathlib import Path
 
 from frisquet_bridge.cli import listen, outside_temp, pair, probe_memory, read, recover_id, serve

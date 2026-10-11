@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
-import json
+import argparse, asyncio, json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,7 +65,10 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _probe(args: argparse.Namespace, raw_recorder: RawMessageRecorder | None = None) -> None:
+async def _probe(
+    args: argparse.Namespace, # parsed probe-memory arguments
+    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+) -> None:
     cfg = load(args.config)
     _require_connect_reader(cfg)
     size = _parse_int(args.size)
@@ -126,15 +127,15 @@ async def _probe(args: argparse.Namespace, raw_recorder: RawMessageRecorder | No
 
 
 async def _read_probe_row(
-    client: FrisquetClient,
+    client: FrisquetClient, # client used to read the block
     *,
-    sample: int,
-    base_addr: int,
-    actual_addr: int,
-    size: int,
-    timeout: float,
-    retries: int,
-    baselines: dict[int, bytes],
+    sample: int, # probe pass index this row belongs to
+    base_addr: int, # address as requested, before the boiler offset
+    actual_addr: int, # address actually read on the wire
+    size: int, # number of bytes to read
+    timeout: float, # per-read response timeout
+    retries: int, # per-read retry count
+    baselines: dict[int, bytes], # first payload seen per address, for diffing
 ) -> dict[str, Any]:
     ts = _utc_now()
     row: dict[str, Any] = {
@@ -164,7 +165,11 @@ async def _read_probe_row(
     return row
 
 
-def parse_address_specs(specs: list[str], *, default_step: int) -> list[int]:
+def parse_address_specs(
+    specs: list[str], # address specs like "0x7a18" or "0x79c4-0x7a6c/0x1c"
+    *,
+    default_step: int, # step used for ranges without an explicit /step
+) -> list[int]:
     if default_step <= 0:
         raise ConfigError("probe-memory --step must be positive")
     addresses: list[int] = []
@@ -195,7 +200,10 @@ def parse_address_specs(specs: list[str], *, default_step: int) -> list[int]:
     return sorted(dict.fromkeys(addresses))
 
 
-def changed_offsets(baseline: bytes, payload: bytes) -> list[tuple[int, int | None, int | None]]:
+def changed_offsets(
+    baseline: bytes, # first payload seen for the address
+    payload: bytes, # payload to compare against it
+) -> list[tuple[int, int | None, int | None]]:
     changes: list[tuple[int, int | None, int | None]] = []
     for offset in range(max(len(baseline), len(payload))):
         old = baseline[offset] if offset < len(baseline) else None
@@ -210,7 +218,10 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
         raise ConfigError('probe-memory requires [frisquet.connect] mode = "read" or "full" with a paired identity')
 
 
-def _parse_address(text: str, original_spec: str) -> int:
+def _parse_address(
+    text: str, # address text to parse
+    original_spec: str, # full spec, used only in the error message
+) -> int:
     value = _parse_int(text)
     if value < 0 or value > 0xFFFF:
         raise ConfigError(f"invalid address spec {original_spec!r}: address must be between 0x0000 and 0xffff")
@@ -254,7 +265,10 @@ def _format_changes(changes: list[dict[str, str | int | None]]) -> str:
     return ",".join(parts)
 
 
-def _decode_summary(base_addr: int, payload: bytes) -> str:
+def _decode_summary(
+    base_addr: int, # requested address selecting the decoder
+    payload: bytes, # raw block to decode
+) -> str:
     data = BoilerData()
     try:
         if base_addr in (ADDR_SENSORS, ADDR_SENSORS_APP):

@@ -27,14 +27,20 @@ log = structlog.get_logger(__name__)
 _SATELLITE_ADDR = {1: ADDR_SATELLITE_Z1, 2: ADDR_SATELLITE_Z2, 3: ADDR_SATELLITE_Z3}
 
 
-def _has_read_only_satellite_zone(cfg: BridgeConfig, enabled_zones: tuple[int, ...]) -> bool:
+def _has_read_only_satellite_zone(
+    cfg: BridgeConfig, # bridge configuration
+    enabled_zones: tuple[int, ...], # zone numbers enabled in the configuration
+) -> bool:
     return any(
         (zone_cfg := cfg.zone(zone_number)) is not None and zone_cfg.is_read_only_satellite
         for zone_number in enabled_zones
     )
 
 
-def _configure_zone_sources(cfg: BridgeConfig, data: BoilerData) -> None:
+def _configure_zone_sources(
+    cfg: BridgeConfig, # bridge configuration
+    data: BoilerData, # aggregate state whose zone sources are set
+) -> None:
     for zone_number, zone_state in data.zones.items():
         zone_cfg = cfg.zone(zone_number)
         if zone_cfg is not None and zone_cfg.uses_virtual_satellite:
@@ -45,7 +51,10 @@ def _configure_zone_sources(cfg: BridgeConfig, data: BoilerData) -> None:
             zone_state.source = ZoneSource.CONNECT
 
 
-def _configure_rf_diagnostics(cfg: BridgeConfig, data: BoilerData) -> None:
+def _configure_rf_diagnostics(
+    cfg: BridgeConfig, # bridge configuration
+    data: BoilerData, # aggregate state to register RF health entries on
+) -> None:
     if cfg.connect_reads_enabled:
         for operation, freshness in (
             ("connect_sensors", 90.0),
@@ -73,7 +82,12 @@ def _configure_rf_diagnostics(cfg: BridgeConfig, data: BoilerData) -> None:
 
 
 class BridgeService:
-    def __init__(self, cfg: BridgeConfig, *, raw_recorder: RawMessageRecorder | None = None) -> None:
+    def __init__(
+        self,
+        cfg: BridgeConfig, # bridge configuration
+        *,
+        raw_recorder: RawMessageRecorder | None = None, # optional raw-frame recorder
+    ) -> None:
         self.cfg = cfg
         self.data = BoilerData()
         self._raw_recorder = raw_recorder
@@ -84,7 +98,12 @@ class BridgeService:
         self._stop.set()
 
     @staticmethod
-    async def _publish_diagnostics(adapter: MqttAdapter, client: aiomqtt.Client, *, interval: float = 30.0) -> None:
+    async def _publish_diagnostics(
+        adapter: MqttAdapter, # adapter that republishes diagnostics
+        client: aiomqtt.Client, # connected MQTT client
+        *,
+        interval: float = 30.0, # seconds between republishes
+    ) -> None:
         """Republish diagnostics so freshness can transition without RF traffic."""
         while True:
             await adapter.publish_state(client)
@@ -161,8 +180,7 @@ class BridgeService:
             adapter: MqttAdapter | None = None
 
             async def publish_mqtt() -> None:
-                if adapter is not None and mqtt_client is not None:
-                    await adapter.publish_state(mqtt_client)
+                if adapter is not None and mqtt_client is not None: await adapter.publish_state(mqtt_client)
 
             enabled_zones = tuple(zone for zone in (1, 2, 3) if self.cfg.zone_enabled(zone))
             _configure_zone_sources(self.cfg, self.data)
@@ -237,13 +255,11 @@ class BridgeService:
                         break
 
             async def mqtt_loop() -> None:
-                if adapter is None or mqtt_client is None:
-                    return
+                if adapter is None or mqtt_client is None: return
                 await adapter.run(mqtt_client)
 
             async def diagnostics_loop() -> None:
-                if adapter is None or mqtt_client is None:
-                    return
+                if adapter is None or mqtt_client is None: return
                 await self._publish_diagnostics(adapter, mqtt_client)
 
             tasks = [
@@ -255,8 +271,7 @@ class BridgeService:
                 tasks.append(asyncio.create_task(diagnostics_loop(), name="diagnostics"))
             for zone_number, satellite in virtual_satellites.items():
                 tasks.append(asyncio.create_task(satellite.run(), name=f"satellite_z{zone_number}"))
-            for task in tasks:
-                task.add_done_callback(self._log_task_done)
+            for task in tasks: task.add_done_callback(self._log_task_done)
 
             log.info("service_started", tasks=[task.get_name() for task in tasks])
             failure: BaseException | None = None
@@ -265,10 +280,8 @@ class BridgeService:
             except BaseException as exc:
                 failure = exc
             scheduler.stop()
-            for satellite in virtual_satellites.values():
-                satellite.stop()
-            for task in tasks:
-                task.cancel()
+            for satellite in virtual_satellites.values(): satellite.stop()
+            for task in tasks: task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             if adapter is not None and mqtt_client is not None:
                 await self._publish_offline_preserving_failure(adapter, mqtt_client, failure)
@@ -278,9 +291,9 @@ class BridgeService:
 
     async def _publish_offline_preserving_failure(
         self,
-        adapter: MqttAdapter,
-        mqtt_client: aiomqtt.Client,
-        failure: BaseException | None,
+        adapter: MqttAdapter, # adapter to publish the offline state with
+        mqtt_client: aiomqtt.Client, # connected MQTT client
+        failure: BaseException | None, # shutdown failure to re-raise afterwards
     ) -> None:
         try:
             await adapter.publish_offline(mqtt_client)
@@ -289,7 +302,10 @@ class BridgeService:
                 raise
             log.exception("mqtt_offline_publish_failed_during_shutdown")
 
-    async def _wait_for_stop_or_transport_failure(self, failure: object) -> None:
+    async def _wait_for_stop_or_transport_failure(
+        self,
+        failure: object, # awaitable that completes when the transport fails
+    ) -> None:
         stop_task = asyncio.create_task(self._stop.wait())
         failure_task = asyncio.ensure_future(failure)  # type: ignore[arg-type]
         done, pending = await asyncio.wait(
@@ -303,8 +319,7 @@ class BridgeService:
             await failure_task
 
     def _log_task_done(self, task: asyncio.Task[object]) -> None:
-        if task.cancelled():
-            return
+        if task.cancelled(): return
         exc = task.exception()
         if exc is None:
             log.info("service_task_finished", task=task.get_name())

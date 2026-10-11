@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
+import argparse, asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -72,7 +71,13 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _listen(port: str, baud: int, network_id: str, boiler_addr: int, raw_recorder: RawMessageRecorder | None = None) -> None:
+async def _listen(
+    port: str, # serial port to open
+    baud: int, # serial baud rate
+    network_id: str, # 4-byte sync word as hex
+    boiler_addr: int, # boiler RF address for passive decoding
+    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+) -> None:
     print(f"Opening {port} @ {baud}...")
     print(f"Sync word (NID): {network_id}")
     if network_id.lower() == "ffffffff":
