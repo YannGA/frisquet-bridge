@@ -121,13 +121,8 @@ def zone_target_temperature(zone: ZoneState) -> float | None:
     return zone.comfort_temperature
 
 
-def resolve_zone_intent(
-    zone: ZoneState,
-    *,
-    hvac_mode: str | None = None,
-    preset: str | None = None,
-    target_temperature: float | None = None,
-) -> ZoneIntent:
+def resolve_zone_intent(zone: ZoneState, *, hvac_mode: str | None = None, preset: str | None = None,
+    target_temperature: float | None = None) -> ZoneIntent:
     'Reconcile HA climate command(s) against current zone state.'
     current_hvac = zone_hvac_mode(zone) or HVAC_AUTO
     current_preset = zone_preset(zone) or PRESET_NONE
@@ -166,11 +161,7 @@ def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
     if intent.frost_temperature is not None: zone.frost_temperature = intent.frost_temperature
 
 
-def _resolve_mode_flags(
-    hvac: str,
-    preset: str,
-    zone: ZoneState,
-) -> tuple[ZoneMode, bool, bool, bool | None]:
+def _resolve_mode_flags(hvac: str, preset: str, zone: ZoneState) -> tuple[ZoneMode, bool, bool, bool | None]:
     if hvac == HVAC_OFF: return ZoneMode.FROST, False, False, None
 
     if hvac == HVAC_AUTO:

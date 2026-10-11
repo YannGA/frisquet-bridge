@@ -27,10 +27,7 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _read(
-    config_path: str,
-    raw_recorder: RawMessageRecorder | None = None,
-) -> None:
+async def _read(config_path: str, raw_recorder: RawMessageRecorder | None = None) -> None:
     cfg = load(config_path)
     _require_connect_reader(cfg)
     state = ProtocolState(**cfg.protocol_state_kwargs("connect"))
@@ -66,10 +63,7 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
     if not cfg.connect_reads_enabled: raise ConfigError('read requires [frisquet.connect] mode = "read" or "full" with a paired identity')
 
 
-def _fmt(
-    value: object,
-    unit: str = "",
-) -> str:
+def _fmt(value: object, unit: str = "") -> str:
     if value is None: return "n/a"
     if isinstance(value, float): return f"{value:.1f}{unit}"
     return f"{value}{unit}"

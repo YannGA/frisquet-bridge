@@ -5,11 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-def add_logging_options(
-    parser: argparse.ArgumentParser,
-    *,
-    suppress_default: bool = False,
-) -> None:
+def add_logging_options(parser: argparse.ArgumentParser, *, suppress_default: bool = False) -> None:
     default = argparse.SUPPRESS if suppress_default else None
     parser.add_argument('--log-level', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'), default=default,
         help='Override logging.level')

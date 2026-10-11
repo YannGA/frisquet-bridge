@@ -207,11 +207,7 @@ class RfHealth:
         if self.consecutive_failures: return "degraded"
         return "healthy"
 
-    def record_success(
-        self,
-        *,
-        rssi: int | None = None,
-    ) -> None:
+    def record_success(self, *, rssi: int | None = None) -> None:
         self.attempts += 1
         self.successes += 1
         self.consecutive_failures = 0
@@ -243,13 +239,7 @@ class BoilerData:
     rf_operations: dict[str, RfHealth] = field(default_factory=dict)
     last_seen_date: str | None = None
 
-    def rf_health(
-        self,
-        operation: str,
-        *,
-        freshness_seconds: float,
-        zone: int | None = None,
-    ) -> RfHealth:
+    def rf_health(self, operation: str, *, freshness_seconds: float, zone: int | None = None) -> RfHealth:
         health = self.rf_operations.get(operation)
         if health is None:
             health = RfHealth(freshness_seconds=freshness_seconds, zone=zone)

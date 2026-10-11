@@ -18,10 +18,7 @@ log = logging.getLogger(__name__)
 ZONE_IDS = {0x08: 1, 0x09: 2, 0x0A: 3}
 
 
-def _consigne_addrs(
-    zone: int,
-    boiler_addr: int,
-) -> set[int]:
+def _consigne_addrs(zone: int, boiler_addr: int) -> set[int]:
     base = ADDR_SATELLITE_CONSIGNE + 0x0005 * (zone - 1)
     return {base, memory_address(base, boiler_addr=boiler_addr)}
 
@@ -29,14 +26,8 @@ def _consigne_addrs(
 class PassiveMirror:
     'Sniff RF traffic and mirror boiler responses into the data model.'
 
-    def __init__(
-        self,
-        data: BoilerData,
-        *,
-        boiler_addr: int = 0x80,
-        on_update: UpdateNotify | None = None,
-        on_zone_config: Callable[[], None] | None = None,
-    ) -> None:
+    def __init__(self, data: BoilerData, *, boiler_addr: int = 0x80, on_update: UpdateNotify | None = None,
+        on_zone_config: Callable[[], None] | None = None) -> None:
         self._data = data
         self._boiler_addr = boiler_addr
         self._on_update = on_update
@@ -75,11 +66,7 @@ class PassiveMirror:
             self._handle_read_response(addr, frame.payload)
         elif frame.msg_type == MSG_INIT: self._handle_boiler_init_response(frame)
 
-    def _handle_satellite_report(
-        self,
-        zone: int,
-        frame: Frame,
-    ) -> bool:
+    def _handle_satellite_report(self, zone: int, frame: Frame) -> bool:
         if frame.payload[:2] == b"\xa1\x54":
             with contextlib.suppress(ValueError):
                 decode_zone_read(frame.payload, zone, self._data)
@@ -115,11 +102,7 @@ class PassiveMirror:
 
     def _addr_pair(self, base: int) -> tuple[int, int]: return (base, memory_address(base, boiler_addr=self._boiler_addr))
 
-    def _handle_read_response(
-        self,
-        addr: int | None,
-        payload: bytes,
-    ) -> None:
+    def _handle_read_response(self, addr: int | None, payload: bytes) -> None:
         if addr is None: return
         if addr in self._addr_pair(ADDR_SENSORS):
             try: decode_sensors(payload, self._data)

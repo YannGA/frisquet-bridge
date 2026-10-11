@@ -48,10 +48,7 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _probe(
-    args: argparse.Namespace,
-    raw_recorder: RawMessageRecorder | None = None,
-) -> None:
+async def _probe(args: argparse.Namespace, raw_recorder: RawMessageRecorder | None = None) -> None:
     cfg = load(args.config)
     _require_connect_reader(cfg)
     size = _parse_int(args.size)
@@ -120,11 +117,7 @@ async def _read_probe_row(
     return row
 
 
-def parse_address_specs(
-    specs: list[str],
-    *,
-    default_step: int,
-) -> list[int]:
+def parse_address_specs(specs: list[str], *, default_step: int) -> list[int]:
     if default_step <= 0: raise ConfigError("probe-memory --step must be positive")
     addresses = []
     for spec in specs:
@@ -151,10 +144,7 @@ def parse_address_specs(
     return sorted(dict.fromkeys(addresses))
 
 
-def changed_offsets(
-    baseline: bytes,
-    payload: bytes,
-) -> list[tuple[int, int | None, int | None]]:
+def changed_offsets(baseline: bytes, payload: bytes) -> list[tuple[int, int | None, int | None]]:
     changes = []
     for offset in range(max(len(baseline), len(payload))):
         old = baseline[offset] if offset < len(baseline) else None
@@ -168,10 +158,7 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
         raise ConfigError('probe-memory requires [frisquet.connect] mode = "read" or "full" with a paired identity')
 
 
-def _parse_address(
-    text: str,
-    original_spec: str,
-) -> int:
+def _parse_address(text: str, original_spec: str) -> int:
     value = _parse_int(text)
     if value < 0 or value > 0xFFFF: raise ConfigError(f"invalid address spec {original_spec!r}: address must be between 0x0000 and 0xffff")
     return value
@@ -204,10 +191,7 @@ def _format_changes(changes: list[dict]) -> str:
     return ",".join(parts)
 
 
-def _decode_summary(
-    base_addr: int,
-    payload: bytes,
-) -> str:
+def _decode_summary(base_addr: int, payload: bytes) -> str:
     data = BoilerData()
     try:
         if base_addr in (ADDR_SENSORS, ADDR_SENSORS_APP):

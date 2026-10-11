@@ -146,12 +146,7 @@ class SerialTransport(Transport):
         received = ReceivedFrame(rssi=rssi, frame=frame, raw=raw)
         for queue in self._subscribers: queue.put_nowait(received)
 
-    def _resolve_pending(
-        self,
-        seq: int,
-        kind: str,
-        error: Exception | None,
-    ) -> None:
+    def _resolve_pending(self, seq: int, kind: str, error: Exception | None) -> None:
         pending = self._pending
         if pending is None or pending[0] != seq:
             log.debug("unmatched_modem_reply", seq=seq, kind=kind)

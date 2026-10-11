@@ -33,10 +33,7 @@ def _has_read_only_satellite_zone(
     return any((zone_cfg := cfg.zone(zone_number)) is not None and zone_cfg.is_read_only_satellite for zone_number in enabled_zones)
 
 
-def _configure_zone_sources(
-    cfg: BridgeConfig,
-    data: BoilerData,
-) -> None:
+def _configure_zone_sources(cfg: BridgeConfig, data: BoilerData) -> None:
     for zone_number, zone_state in data.zones.items():
         zone_cfg = cfg.zone(zone_number)
         if zone_cfg is not None and zone_cfg.uses_virtual_satellite: zone_state.source = ZoneSource.VIRTUAL
@@ -44,10 +41,7 @@ def _configure_zone_sources(
         elif cfg.connect_reads_enabled: zone_state.source = ZoneSource.CONNECT
 
 
-def _configure_rf_diagnostics(
-    cfg: BridgeConfig,
-    data: BoilerData,
-) -> None:
+def _configure_rf_diagnostics(cfg: BridgeConfig, data: BoilerData) -> None:
     if cfg.connect_reads_enabled:
         for operation, freshness in (("connect_sensors", 90.0), ("connect_consumption", 7200.0), ("connect_daily_consumption", 7200.0),
             ("connect_dhw_mode", 7200.0), ("connect_clock", 7200.0)):
@@ -68,12 +62,7 @@ def _configure_rf_diagnostics(
 
 
 class BridgeService:
-    def __init__(
-        self,
-        cfg: BridgeConfig,
-        *,
-        raw_recorder: RawMessageRecorder | None = None,
-    ) -> None:
+    def __init__(self, cfg: BridgeConfig, *, raw_recorder: RawMessageRecorder | None = None) -> None:
         self.cfg = cfg
         self.data = BoilerData()
         self._raw_recorder = raw_recorder
@@ -84,12 +73,7 @@ class BridgeService:
         self._stop.set()
 
     @staticmethod
-    async def _publish_diagnostics(
-        adapter: MqttAdapter,
-        client: aiomqtt.Client,
-        *,
-        interval: float = 30.0,
-    ) -> None:
+    async def _publish_diagnostics(adapter: MqttAdapter, client: aiomqtt.Client, *, interval: float = 30.0) -> None:
         'Republish diagnostics so freshness can transition without RF traffic.'
         while True:
             await adapter.publish_state(client)
@@ -211,21 +195,13 @@ class BridgeService:
             log.info("service_stopped")
             if failure is not None: raise failure
 
-    async def _publish_offline_preserving_failure(
-        self,
-        adapter: MqttAdapter,
-        mqtt_client: aiomqtt.Client,
-        failure: BaseException | None,
-    ) -> None:
+    async def _publish_offline_preserving_failure(self, adapter: MqttAdapter, mqtt_client: aiomqtt.Client, failure: BaseException | None) -> None:
         try: await adapter.publish_offline(mqtt_client)
         except Exception:
             if failure is None: raise
             log.exception("mqtt_offline_publish_failed_during_shutdown")
 
-    async def _wait_for_stop_or_transport_failure(
-        self,
-        failure: object,
-    ) -> None:
+    async def _wait_for_stop_or_transport_failure(self, failure: object) -> None:
         stop_task = asyncio.create_task(self._stop.wait())
         failure_task = asyncio.ensure_future(failure)  # type: ignore[arg-type]
         done, pending = await asyncio.wait((stop_task, failure_task), return_when=asyncio.FIRST_COMPLETED)

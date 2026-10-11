@@ -32,13 +32,7 @@ class Association:
 class AddressNotFound(TransportError):
     'The boiler rejected a matching operation because its address is unknown.'
 
-    def __init__(
-        self,
-        *,
-        request_msg_type: int,
-        request_payload: bytes,
-        response: Frame,
-    ) -> None:
+    def __init__(self, *, request_msg_type: int, request_payload: bytes, response: Frame) -> None:
         self.request_msg_type = request_msg_type
         self.request_payload = request_payload
         self.response = response
@@ -87,19 +81,8 @@ class FrisquetClient:
         callback = self._attempt_outcome_callback.get()
         if callback is not None: callback(outcome, rssi)
 
-    async def request(
-        self,
-        *,
-        control: int,
-        msg_type: int,
-        payload: bytes,
-        from_addr: int | None = None,
-        to_addr: int | None = None,
-        timeout: float = _DEFAULT_TIMEOUT,
-        retries: int = _DEFAULT_RETRIES,
-        burst: int = 1,
-        burst_interval: float = 0.0,
-    ) -> Frame:
+    async def request(self, *, control: int, msg_type: int, payload: bytes, from_addr: int | None = None, to_addr: int | None = None,
+        timeout: float = _DEFAULT_TIMEOUT, retries: int = _DEFAULT_RETRIES, burst: int = 1, burst_interval: float = 0.0) -> Frame:
         """Send a frame and await the boiler's matching response.
 
         The response is identified by swapped addresses and the same
@@ -118,19 +101,8 @@ class FrisquetClient:
             return await self._request_locked(control=control, msg_type=msg_type, payload=payload, from_addr=from_addr, to_addr=to_addr,
                 timeout=timeout, retries=retries, burst=burst, burst_interval=burst_interval)
 
-    async def _request_locked(
-        self,
-        *,
-        control: int,
-        msg_type: int,
-        payload: bytes,
-        from_addr: int,
-        to_addr: int,
-        timeout: float,
-        retries: int,
-        burst: int = 1,
-        burst_interval: float = 0.0,
-    ) -> Frame:
+    async def _request_locked(self, *, control: int, msg_type: int, payload: bytes, from_addr: int, to_addr: int, timeout: float, retries: int,
+        burst: int = 1, burst_interval: float = 0.0) -> Frame:
         await self._transport.set_network_id(self._state.network_id)
 
         async with self._transport.subscribe() as queue:
@@ -223,19 +195,8 @@ class FrisquetClient:
         response = await self.request(control=0x01, msg_type=MSG_READ, payload=payload, **kwargs)  # type: ignore[arg-type]
         return response.payload
 
-    async def _await_match(
-        self,
-        queue: asyncio.Queue,
-        *,
-        from_addr: int,
-        to_addr: int,
-        association_id: int,
-        request_id: int,
-        control: int,
-        msg_type: int,
-        request_payload: bytes,
-        timeout: float,
-    ) -> Frame | None:
+    async def _await_match(self, queue: asyncio.Queue, *, from_addr: int, to_addr: int, association_id: int, request_id: int, control: int,
+        msg_type: int, request_payload: bytes, timeout: float) -> Frame | None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:

@@ -86,14 +86,7 @@ class Frame:
     @property
     def payload_hex(self) -> str: return self.payload.hex()
 
-    def matches(
-        self,
-        *,
-        from_addr: int,
-        to_addr: int,
-        association_id: int,
-        request_id: int,
-    ) -> bool:
+    def matches(self, *, from_addr: int, to_addr: int, association_id: int, request_id: int) -> bool:
         'True if this frame is the response identified by these fields.'
         return (self.from_addr == from_addr and self.to_addr == to_addr
             and self.association_id == association_id and self.request_id == request_id)

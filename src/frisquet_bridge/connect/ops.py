@@ -32,13 +32,7 @@ ZONE_OPTS_COMFORT_BIT = 0x01  # comfort (vs eco) within a fixed level
 ZONE_OPTS_BOOST_BIT = 0x40
 
 
-def _zone_mode_options(
-    mode: ZoneMode,
-    *,
-    auto_comfort: bool,
-    override: bool,
-    boost: bool,
-) -> int:
+def _zone_mode_options(mode: ZoneMode, *, auto_comfort: bool, override: bool, boost: bool) -> int:
     if mode == ZoneMode.FROST: return ZONE_OPTS_FROST
     if mode == ZoneMode.AUTO and not override: return ZONE_OPTS_SCHEDULE
     opts = ZONE_OPTS_FIXED
@@ -155,35 +149,20 @@ class BoilerOps:
 
         await self._tracked(data, operation, freshness_seconds, read_and_decode)
 
-    async def read_sensors(
-        self,
-        data: BoilerData,
-    ) -> None:
+    async def read_sensors(self, data: BoilerData) -> None:
         await self._tracked_read(data, 'connect_sensors', 90.0, self._addr(ADDR_SENSORS), 28, decode_sensors)
 
-    async def read_consumption(
-        self,
-        data: BoilerData,
-    ) -> None:
+    async def read_consumption(self, data: BoilerData) -> None:
         await self._tracked_read(data, 'connect_consumption', 7200.0, self._addr(ADDR_CONSUMPTION), 28, decode_consumption)
 
-    async def read_daily_consumption(
-        self,
-        data: BoilerData,
-    ) -> None:
+    async def read_daily_consumption(self, data: BoilerData) -> None:
         await self._tracked_read(data, 'connect_daily_consumption', 7200.0, self._addr(ADDR_DAILY_CONSUMPTION), 28,
             decode_daily_consumption)
 
-    async def read_dhw_mode(
-        self,
-        data: BoilerData,
-    ) -> None:
+    async def read_dhw_mode(self, data: BoilerData) -> None:
         await self._tracked_read(data, 'connect_dhw_mode', 7200.0, self._addr(ADDR_DHW_MODE), 1, decode_dhw_mode)
 
-    async def read_clock(
-        self,
-        data: BoilerData,
-    ) -> None:
+    async def read_clock(self, data: BoilerData) -> None:
         await self._tracked_read(data, 'connect_clock', 7200.0, self._addr(ADDR_DATE), 4, decode_clock)
 
     async def read_satellite_info(
@@ -213,11 +192,7 @@ class BoilerOps:
                 f"zone {zone}: setpoints/mode not yet learned "
                 "(waiting for satellite 0xa154 broadcast or a zone write)")
 
-    async def write_dhw_mode(
-        self,
-        data: BoilerData,
-        mode: DhwMode,
-    ) -> None:
+    async def write_dhw_mode(self, data: BoilerData, mode: DhwMode) -> None:
         raw = (mode.byte & 0x7E) | data.boiler.dhw_frame_bits
         body = struct.pack(">HHHHB", self._addr(ADDR_DHW_MODE), 1, self._addr(ADDR_DHW_MODE), 1, 2)
         body += bytes((0x00, raw))
@@ -225,19 +200,9 @@ class BoilerOps:
         data.boiler.dhw_mode = mode
         log.info("dhw_mode_written", mode=mode.value, raw=f"0x{raw:02x}")
 
-    async def write_zone_short(
-        self,
-        zone: int,
-        data: BoilerData,
-        *,
-        mode: ZoneMode | None = None,
-        boost: bool | None = None,
-        override: bool | None = None,
-        auto_comfort: bool | None = None,
-        comfort_temperature: float | None = None,
-        reduced_temperature: float | None = None,
-        frost_temperature: float | None = None,
-    ) -> None:
+    async def write_zone_short(self, zone: int, data: BoilerData, *, mode: ZoneMode | None = None, boost: bool | None = None,
+        override: bool | None = None, auto_comfort: bool | None = None, comfort_temperature: float | None = None,
+        reduced_temperature: float | None = None, frost_temperature: float | None = None) -> None:
         'Send a short zone INIT (mode/setpoints) like OpenFrisquetVisio envoyerZone.'
         await self.ensure_zone_metadata(zone, data)
         zs = data.zones[zone]
@@ -296,48 +261,24 @@ class BoilerOps:
         log.info('zone_written', zone=zone, mode=mode.value, boost=boost, override=zs.override, auto_comfort=zs.auto_comfort,
             mode_options=f'0x{opts:02x}', schedule_known=zs.schedule is not None)
 
-    async def apply_zone_climate(
-        self,
-        zone: int,
-        data: BoilerData,
-        *,
-        hvac_mode: str | None = None,
-        preset: str | None = None,
-        target_temperature: float | None = None,
-    ) -> None:
+    async def apply_zone_climate(self, zone: int, data: BoilerData, *, hvac_mode: str | None = None, preset: str | None = None,
+        target_temperature: float | None = None) -> None:
         await self.ensure_zone_metadata(zone, data)
         intent = resolve_zone_intent(data.zones[zone], hvac_mode=hvac_mode, preset=preset, target_temperature=target_temperature)
         await self.write_zone_short(zone, data, mode=intent.mode, boost=intent.boost, override=intent.override,
             auto_comfort=intent.auto_comfort, comfort_temperature=intent.comfort_temperature,
             reduced_temperature=intent.reduced_temperature, frost_temperature=intent.frost_temperature)
 
-    async def write_zone_mode(
-        self,
-        zone: int,
-        data: BoilerData,
-        mode: ZoneMode,
-        *,
-        boost: bool = False,
-    ) -> None:
+    async def write_zone_mode(self, zone: int, data: BoilerData, mode: ZoneMode, *, boost: bool = False) -> None:
         await self.write_zone_short(zone, data, mode=mode, boost=boost, override=False)
 
-    async def write_zone_boost(
-        self,
-        zone: int,
-        data: BoilerData,
-        boost: bool,
-    ) -> None:
+    async def write_zone_boost(self, zone: int, data: BoilerData, boost: bool) -> None:
         zs = data.zones[zone]
         mode = zs.mode
         if mode is None: raise ValueError(f"zone {zone}: mode unknown")
         await self.write_zone_short(zone, data, mode=mode, boost=boost)
 
-    async def write_zone_override(
-        self,
-        zone: int,
-        data: BoilerData,
-        value: str,
-    ) -> None:
+    async def write_zone_override(self, zone: int, data: BoilerData, value: str) -> None:
         normalized = value.strip().casefold().replace("é", "e").replace("_", " ").replace("-", " ")
         if normalized in {"none", "off", "clear", "auto"}:
             await self.write_zone_short(zone, data, mode=ZoneMode.AUTO, boost=False, override=False)
@@ -350,11 +291,7 @@ class BoilerOps:
             return
         raise ValueError(f"zone {zone}: override must be one of none, comfort, reduced")
 
-    async def write_outside_temperature(
-        self,
-        data: BoilerData,
-        temperature: float,
-    ) -> None:
+    async def write_outside_temperature(self, data: BoilerData, temperature: float) -> None:
         temp = max(-30.0, min(80.0, round(temperature * 10) / 10))
         body = SONDE_TEMP_PREFIX + encode_temp16(temp)
 
@@ -366,19 +303,8 @@ class BoilerOps:
         data.sonde.outside_temperature = temp
         log.info('outside_temperature_written', temperature=temp, boiler_clock=data.last_seen_date)
 
-    async def send_zone_consigne(
-        self,
-        zone: int,
-        data: BoilerData,
-        *,
-        ambient: float,
-        setpoint: float,
-        connect_compat: bool = False,
-        timeout: float = A029_TIMEOUT,
-        retries: int = A029_RETRIES,
-        burst: int = A029_BURST,
-        burst_interval: float = A029_BURST_INTERVAL,
-    ) -> None:
+    async def send_zone_consigne(self, zone: int, data: BoilerData, *, ambient: float, setpoint: float, connect_compat: bool = False,
+        timeout: float = A029_TIMEOUT, retries: int = A029_RETRIES, burst: int = A029_BURST, burst_interval: float = A029_BURST_INTERVAL) -> None:
         """Send a zone setpoint as a (virtual) satellite would (0xa02f write).
 
         Mirrors OpenFrisquetVisio ``Satellite::envoyerConsigne``: writes
@@ -412,10 +338,7 @@ def ops_from_config(
     return BoilerOps(client, boiler_addr=boiler_addr, memory_offset=memory_offset)
 
 
-def _zone_schedule_bytes(
-    data: BoilerData,
-    zone: int,
-) -> bytes | None:
+def _zone_schedule_bytes(data: BoilerData, zone: int) -> bytes | None:
     schedule = data.zones[zone].schedule
     if schedule is None: return None
     return b"".join(schedule.days[day] for day in SCHEDULE_DAYS)

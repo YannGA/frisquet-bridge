@@ -24,10 +24,7 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _serve(
-    cfg: BridgeConfig,
-    raw_recorder: RawMessageRecorder | None,
-) -> None:
+async def _serve(cfg: BridgeConfig, raw_recorder: RawMessageRecorder | None) -> None:
     service = BridgeService(cfg, raw_recorder=raw_recorder)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM): loop.add_signal_handler(sig, service.stop)

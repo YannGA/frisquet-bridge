@@ -6,7 +6,7 @@ import logging
 
 from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_INFO, ADDR_SENSORS,
     ADDR_SENSORS_APP, ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_info,
-    decode_sensors, decode_zone_init, describe_boiler_event, describe_memory_push, memory_address)
+    decode_sensors, decode_zone_init, describe_boiler_event, describe_memory_push, memory_addrs)
 from frisquet_bridge.frame import ADDR_BOILER, MSG_BOILER_EVENT, MSG_INIT, MSG_MEMORY_PUSH, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData, ZoneSource
 
@@ -89,10 +89,7 @@ def consumption_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_CO
 def daily_consumption_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_DAILY_CONSUMPTION, boiler_addr)
 
 
-def read_addr_name(
-    addr: int,
-    boiler_addr: int,
-) -> str | None:
+def read_addr_name(addr: int, boiler_addr: int) -> str | None:
     if addr in memory_addrs(ADDR_SENSORS, boiler_addr): return "sensors"
     if addr in memory_addrs(ADDR_SENSORS_APP, boiler_addr): return "sensors_app"
     if addr in memory_addrs(ADDR_CONSUMPTION, boiler_addr): return "consumption"
@@ -103,13 +100,6 @@ def read_addr_name(
 
 
 def sensor_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_SENSORS, boiler_addr) | memory_addrs(ADDR_SENSORS_APP, boiler_addr)
-
-
-def memory_addrs(
-    base: int,
-    boiler_addr: int,
-) -> set[int]:
-    return {base, memory_address(base, boiler_addr=boiler_addr)}
 
 
 def _suffix(name: str | None) -> str: return f" ({name})" if name else ""

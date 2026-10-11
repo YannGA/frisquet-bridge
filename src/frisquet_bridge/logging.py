@@ -66,14 +66,8 @@ class RawMessageRecorder:
         self.record("rf_frame", **fields)
 
 
-def configure_logging(
-    config: LoggingConfig,
-    *,
-    level: str | None = None,
-    log_format: str | None = None,
-    log_file: str | None = None,
-    raw_log_file: str | None = None,
-) -> RawMessageRecorder | None:
+def configure_logging(config: LoggingConfig, *, level: str | None = None, log_format: str | None = None, log_file: str | None = None,
+    raw_log_file: str | None = None) -> RawMessageRecorder | None:
     'Configure application logging and return an optional raw recorder.'
 
     effective_level = (level or config.level).upper()

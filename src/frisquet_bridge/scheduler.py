@@ -83,13 +83,8 @@ class PollScheduler:
         normalized = max(-30.0, min(80.0, round(temperature * 10) / 10))
         return await self._attempt_outside_temperature(normalized, is_change=True)
 
-    async def _attempt_outside_temperature(
-        self,
-        temperature: float | object = _UNCHANGED,
-        *,
-        only_if_due: bool = False,
-        is_change: bool = False,
-    ) -> bool:
+    async def _attempt_outside_temperature(self, temperature: float | object = _UNCHANGED, *, only_if_due: bool = False,
+        is_change: bool = False) -> bool:
         if self._sonde_ops is None: return False
         async with self._outside_temperature_lock:
             loop = asyncio.get_running_loop()

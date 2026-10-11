@@ -402,11 +402,7 @@ def _validate_logging(config: LoggingConfig) -> None:
     if config.raw_backup_count < 0: raise ConfigError("logging.raw_backup_count: expected non-negative integer")
 
 
-def _validate_keys(
-    table: dict[str, object],
-    allowed: set[str],
-    field_name: str,
-) -> None:
+def _validate_keys(table: dict[str, object], allowed: set[str], field_name: str) -> None:
     unknown = sorted(set(table) - allowed)
     if unknown:
         expected = ", ".join(sorted(allowed))
@@ -447,11 +443,7 @@ def _positive_float(value: object, field_name: str) -> float:
     return parsed
 
 
-def _parse_hex_bytes(
-    value: str,
-    length: int,
-    field_name: str,
-) -> bytes:
+def _parse_hex_bytes(value: str, length: int, field_name: str) -> bytes:
     cleaned = value.replace(" ", "").lower()
     try: raw = bytes.fromhex(cleaned)
     except ValueError as exc: raise ConfigError(f"{field_name}: invalid hex") from exc

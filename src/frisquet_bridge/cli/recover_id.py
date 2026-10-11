@@ -27,12 +27,7 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _recover(
-    config_path: str,
-    timeout: float,
-    save: bool,
-    raw_recorder: RawMessageRecorder | None = None,
-) -> None:
+async def _recover(config_path: str, timeout: float, save: bool, raw_recorder: RawMessageRecorder | None = None) -> None:
     cfg = load(config_path)
     state = ProtocolState(network_id=b"\xff\xff\xff\xff", association_id=0xFF)
     async with SerialTransport(cfg.serial.port, cfg.serial.speed, raw_recorder=raw_recorder) as transport:

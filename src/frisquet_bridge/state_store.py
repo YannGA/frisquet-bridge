@@ -74,10 +74,7 @@ def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
     if isinstance(schedule, str): zone.schedule = ZoneSchedule.decode(bytes.fromhex(schedule))
 
 
-def save_zone_state(
-    path: Path,
-    data: BoilerData,
-) -> None:
+def save_zone_state(path: Path, data: BoilerData) -> None:
     'Atomically persist any learned zone metadata to ``path``.'
     try:
         payload = _load_payload(path)
@@ -89,10 +86,7 @@ def save_zone_state(
     except OSError as exc: log.warning("zone_state_save_failed", path=str(path), error=str(exc))
 
 
-def load_zone_state(
-    path: Path,
-    data: BoilerData,
-) -> None:
+def load_zone_state(path: Path, data: BoilerData) -> None:
     'Populate ``data`` with previously-learned zone metadata, if present.'
     payload = _load_payload(path)
     loaded = []
