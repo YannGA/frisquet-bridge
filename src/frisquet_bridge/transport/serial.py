@@ -25,11 +25,11 @@ _COMMAND_TIMEOUT = 3.0
 class SerialTransport(Transport):
     def __init__(
         self,
-        port: str, # serial device path, e.g. /dev/ttyACM0
+        port: str,
         baud: int = 115200, # line speed, fixed by the firmware
         *,
-        command_timeout: float = _COMMAND_TIMEOUT, # seconds to await OK/ERR/PONG
-        raw_recorder: RawMessageRecorder | None = None, # optional raw-traffic JSONL recorder
+        command_timeout: float = _COMMAND_TIMEOUT,
+        raw_recorder: RawMessageRecorder | None = None,
     ) -> None:
         self._port = port
         self._baud = baud
@@ -148,9 +148,9 @@ class SerialTransport(Transport):
 
     def _resolve_pending(
         self,
-        seq: int, # sequence echoed by the modem reply
-        kind: str, # reply kind received (OK/ERR/PONG)
-        error: Exception | None, # error to fail the future with, or None on success
+        seq: int,
+        kind: str,
+        error: Exception | None,
     ) -> None:
         pending = self._pending
         if pending is None or pending[0] != seq:
@@ -169,7 +169,7 @@ class SerialTransport(Transport):
         self,
         line: str, # modem command without the sequence token or CRC
         *,
-        expected_kind: str = "OK", # reply kind that resolves this command
+        expected_kind: str = "OK",
     ) -> None:
         if self._serial is None: raise TransportError("transport not open")
         loop = asyncio.get_running_loop()

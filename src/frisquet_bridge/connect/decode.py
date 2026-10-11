@@ -31,7 +31,7 @@ TEMP16_EXTREME_ABSENT = 258.1
 def memory_address(
     base: int,
     *,
-    boiler_addr: int, # boiler address; 0x84 reads the alternate (BOILER_ALT_OFFSET) bank
+    boiler_addr: int,
 ) -> int:
     return base + (BOILER_ALT_OFFSET if boiler_addr == 0x84 else 0)
 
@@ -101,10 +101,10 @@ def decode_daily_consumption(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_dhw_mode(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     data: BoilerData,
     *,
-    frame_bits: int | None = None, # override the frame bits instead of masking the payload
+    frame_bits: int | None = None,
 ) -> None:
     if not payload: raise ValueError(f"dhw mode payload too short: {len(payload)} bytes")
     raw = payload[2] if len(payload) >= 3 else payload[0]
@@ -142,7 +142,7 @@ def decode_satellite_init_response(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_zone_read(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     zone: int,
     data: BoilerData,
 ) -> None:
@@ -157,7 +157,7 @@ def decode_zone_read(
 
 
 def decode_zone_init(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     zone: int,
     data: BoilerData,
 ) -> None:
@@ -203,7 +203,7 @@ def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_zone_consigne(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     zone: int,
     data: BoilerData,
 ) -> None:
@@ -231,7 +231,7 @@ _AUTO_SATELLITE_MODE = {(True, True): 3, (True, False): 5, (False, True): 2, (Fa
 def encode_satellite_mode(
     zone: ZoneState,
     *,
-    connect_compat: bool = False, # XOR 0x20 to match the Connect-compatible encoding
+    connect_compat: bool = False,
 ) -> int:
     """Encode zone mode for a satellite setpoint frame (see Satellite::getMode).
 
@@ -258,11 +258,11 @@ def _zone_init_body(payload: bytes) -> bytes:
 
 
 def _decode_satellite_zone(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     data: BoilerData,
     *,
     zone: int,
-    offset: int, # byte offset of this zone's block
+    offset: int,
 ) -> None:
     zs = data.zones[zone]
     if zs.source != ZoneSource.SATELLITE: return
@@ -346,10 +346,10 @@ def parse_boiler_event_push(payload: bytes) -> BoilerEventPush:
 
 
 def decode_memory_push(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     data: BoilerData,
     *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+    boiler_addr: int = 0x80,
 ) -> MemoryPush:
     'Parse a MEMORY_PUSH (0x10) and update ``data`` when the block is known.'
     push = parse_memory_push(payload)
@@ -360,16 +360,16 @@ def decode_memory_push(
 def memory_push_block_name(
     address: int,
     *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+    boiler_addr: int = 0x80,
 ) -> str | None:
     if address in memory_addrs(ADDR_DHW_MODE, boiler_addr): return "dhw_mode"
     return None
 
 
 def describe_memory_push(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    payload: bytes,
     *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
+    boiler_addr: int = 0x80,
 ) -> str:
     data = BoilerData()
     try: push = parse_memory_push(payload)

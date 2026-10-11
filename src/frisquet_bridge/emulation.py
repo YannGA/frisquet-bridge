@@ -19,8 +19,8 @@ ZONE_IDS = {0x08: 1, 0x09: 2, 0x0A: 3}
 
 
 def _consigne_addrs(
-    zone: int, # zone number (1-3)
-    boiler_addr: int, # boiler address for the memory-mapped alias
+    zone: int,
+    boiler_addr: int,
 ) -> set[int]:
     base = ADDR_SATELLITE_CONSIGNE + 0x0005 * (zone - 1)
     return {base, memory_address(base, boiler_addr=boiler_addr)}
@@ -33,7 +33,7 @@ class PassiveMirror:
         self,
         data: BoilerData,
         *,
-        boiler_addr: int = 0x80, # address of the boiler we mirror
+        boiler_addr: int = 0x80,
         on_update: UpdateNotify | None = None,
         on_zone_config: Callable[[], None] | None = None,
     ) -> None:
@@ -78,7 +78,7 @@ class PassiveMirror:
     def _handle_satellite_report(
         self,
         zone: int,
-        frame: Frame, # satellite's MSG_INIT frame addressed to the boiler
+        frame: Frame,
     ) -> bool:
         if frame.payload[:2] == b"\xa1\x54":
             with contextlib.suppress(ValueError):
@@ -117,8 +117,8 @@ class PassiveMirror:
 
     def _handle_read_response(
         self,
-        addr: int | None, # READ address remembered from the request, if matched
-        payload: bytes, # boiler's response payload
+        addr: int | None,
+        payload: bytes,
     ) -> None:
         if addr is None: return
         if addr in self._addr_pair(ADDR_SENSORS):

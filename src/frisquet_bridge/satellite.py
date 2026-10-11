@@ -37,11 +37,11 @@ class VirtualSatellite:
     def __init__(
         self,
         zone: int,
-        ops: BoilerOps, # ops used to send the consigne
-        data: BoilerData, # shared data model
+        ops: BoilerOps,
+        data: BoilerData,
         *,
-        interval: float = CONSIGNE_INTERVAL, # seconds between periodic sends
-        connect_compat: bool = False, # encode modes the way the official Connect app does
+        interval: float = CONSIGNE_INTERVAL,
+        connect_compat: bool = False,
         profile: str = "virtual_satellite", # consigne profile: virtual_satellite, central_boiler or simple_satellite
         on_update: UpdateNotify | None = None,
     ) -> None:

@@ -25,8 +25,8 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _serve(
-    cfg: BridgeConfig, # loaded bridge configuration
-    raw_recorder: RawMessageRecorder | None, # sink for raw serial lines
+    cfg: BridgeConfig,
+    raw_recorder: RawMessageRecorder | None,
 ) -> None:
     service = BridgeService(cfg, raw_recorder=raw_recorder)
     loop = asyncio.get_running_loop()

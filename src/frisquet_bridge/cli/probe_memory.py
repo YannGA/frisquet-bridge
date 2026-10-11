@@ -49,8 +49,8 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _probe(
-    args: argparse.Namespace, # parsed probe-memory arguments
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    args: argparse.Namespace,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     cfg = load(args.config)
     _require_connect_reader(cfg)
@@ -93,14 +93,14 @@ async def _probe(
 
 
 async def _read_probe_row(
-    client: FrisquetClient, # client used to read the block
+    client: FrisquetClient,
     *,
-    sample: int, # probe pass index this row belongs to
-    base_addr: int, # address as requested, before the boiler offset
-    actual_addr: int, # address actually read on the wire
-    size: int, # number of bytes to read
-    timeout: float, # per-read response timeout
-    retries: int, # per-read retry count
+    sample: int,
+    base_addr: int,
+    actual_addr: int,
+    size: int,
+    timeout: float,
+    retries: int,
     baselines: dict[int, bytes], # first payload seen per address, for diffing
 ) -> dict[str, Any]:
     ts = _utc_now()
@@ -121,9 +121,9 @@ async def _read_probe_row(
 
 
 def parse_address_specs(
-    specs: list[str], # address specs like "0x7a18" or "0x79c4-0x7a6c/0x1c"
+    specs: list[str],
     *,
-    default_step: int, # step used for ranges without an explicit /step
+    default_step: int,
 ) -> list[int]:
     if default_step <= 0: raise ConfigError("probe-memory --step must be positive")
     addresses = []
@@ -152,8 +152,8 @@ def parse_address_specs(
 
 
 def changed_offsets(
-    baseline: bytes, # first payload seen for the address
-    payload: bytes, # payload to compare against it
+    baseline: bytes,
+    payload: bytes,
 ) -> list[tuple[int, int | None, int | None]]:
     changes = []
     for offset in range(max(len(baseline), len(payload))):
@@ -169,8 +169,8 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
 
 
 def _parse_address(
-    text: str, # address text to parse
-    original_spec: str, # full spec, used only in the error message
+    text: str,
+    original_spec: str,
 ) -> int:
     value = _parse_int(text)
     if value < 0 or value > 0xFFFF: raise ConfigError(f"invalid address spec {original_spec!r}: address must be between 0x0000 and 0xffff")
@@ -205,8 +205,8 @@ def _format_changes(changes: list[dict]) -> str:
 
 
 def _decode_summary(
-    base_addr: int, # requested address selecting the decoder
-    payload: bytes, # raw block to decode
+    base_addr: int,
+    payload: bytes,
 ) -> str:
     data = BoilerData()
     try:

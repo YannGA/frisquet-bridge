@@ -92,7 +92,7 @@ def _auto_active_preset(zone: ZoneState) -> str:
 
 
 def zone_hvac_action(
-    zone: ZoneState, # current zone state seeding the defaults
+    zone: ZoneState,
     boiler: BoilerState, # fallback when the zone reports no ambient/setpoint
 ) -> str | None:
     if zone.mode is None: return None
@@ -122,11 +122,11 @@ def zone_target_temperature(zone: ZoneState) -> float | None:
 
 
 def resolve_zone_intent(
-    zone: ZoneState, # current zone state seeding the defaults
+    zone: ZoneState,
     *,
-    hvac_mode: str | None = None, # HA hvac command, or None to keep the zone's mode
-    preset: str | None = None, # HA preset command, or None to keep the zone's preset
-    target_temperature: float | None = None, # HA target, or None to leave setpoints untouched
+    hvac_mode: str | None = None,
+    preset: str | None = None,
+    target_temperature: float | None = None,
 ) -> ZoneIntent:
     'Reconcile HA climate command(s) against current zone state.'
     current_hvac = zone_hvac_mode(zone) or HVAC_AUTO
@@ -167,9 +167,9 @@ def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
 
 
 def _resolve_mode_flags(
-    hvac: str, # canonical hvac mode ("off"/"auto"/"heat")
-    preset: str, # canonical preset
-    zone: ZoneState, # current zone state seeding the defaults
+    hvac: str,
+    preset: str,
+    zone: ZoneState,
 ) -> tuple[ZoneMode, bool, bool, bool | None]:
     if hvac == HVAC_OFF: return ZoneMode.FROST, False, False, None
 
@@ -193,10 +193,10 @@ def _resolve_mode_flags(
 def _apply_target_temperature(
     temperature: float, # requested target, rounded to 0.1
     *,
-    mode: ZoneMode, # resolved mode the target applies to
+    mode: ZoneMode,
     boost: bool,
-    override: bool, # whether an auto derogation is active
-    auto_comfort: bool | None, # derogated level in auto, or None
+    override: bool,
+    auto_comfort: bool | None,
     comfort: float | None,
     reduced: float | None,
     frost: float | None,

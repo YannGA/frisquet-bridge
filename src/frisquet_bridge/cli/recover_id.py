@@ -28,10 +28,10 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _recover(
-    config_path: str, # config file to load, and to save the network id into
-    timeout: float, # seconds to wait for an association broadcast
-    save: bool, # persist the recovered network id to the config
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    config_path: str,
+    timeout: float,
+    save: bool,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     cfg = load(config_path)
     state = ProtocolState(network_id=b"\xff\xff\xff\xff", association_id=0xFF)

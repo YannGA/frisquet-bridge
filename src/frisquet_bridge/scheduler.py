@@ -33,19 +33,19 @@ _UNCHANGED = object()
 class PollScheduler:
     def __init__(
         self,
-        ops: BoilerOps | None, # Connect ops for boiler reads, or None when unavailable
+        ops: BoilerOps | None,
         data: BoilerData,
         *,
-        poll_connect: bool = True, # whether to poll the boiler over Connect
+        poll_connect: bool = True,
         sonde_ops: BoilerOps | None = None,
-        push_outside_temperature: bool = False, # whether to transmit outside-temperature changes
-        sensor_interval: float = SENSOR_INTERVAL, # seconds between sensor reads
-        poll_satellite_info: bool = True, # whether to re-read satellite info periodically
-        satellite_info_interval: float = SATELLITE_INFO_INTERVAL, # seconds between satellite-info reads
-        satellite_info_timeout: float = SATELLITE_INFO_TIMEOUT, # seconds to wait for a satellite-info reply
-        outside_temperature_interval: float = OUTSIDE_TEMPERATURE_INTERVAL, # keepalive interval for the outside temperature
-        outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL, # seconds before retrying a failed write
-        outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL, # min seconds between change-driven writes
+        push_outside_temperature: bool = False,
+        sensor_interval: float = SENSOR_INTERVAL,
+        poll_satellite_info: bool = True,
+        satellite_info_interval: float = SATELLITE_INFO_INTERVAL,
+        satellite_info_timeout: float = SATELLITE_INFO_TIMEOUT,
+        outside_temperature_interval: float = OUTSIDE_TEMPERATURE_INTERVAL,
+        outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL,
+        outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL,
         enabled_zones: tuple[int, ...] = (1, 2, 3), # zone numbers whose state is logged
         on_update: UpdateNotify | None = None,
     ) -> None:
@@ -85,10 +85,10 @@ class PollScheduler:
 
     async def _attempt_outside_temperature(
         self,
-        temperature: float | object = _UNCHANGED, # new temperature, or _UNCHANGED to transmit the stored one
+        temperature: float | object = _UNCHANGED,
         *,
-        only_if_due: bool = False, # skip the write unless its due time has passed
-        is_change: bool = False, # apply the minimum change interval to a user-driven change
+        only_if_due: bool = False,
+        is_change: bool = False,
     ) -> bool:
         if self._sonde_ops is None: return False
         async with self._outside_temperature_lock:
@@ -150,7 +150,7 @@ class PollScheduler:
 
     async def _safe_poll(
         self,
-        name: str, # poll name used in logs
+        name: str,
         fn: Callable[[], Awaitable], # coroutine factory performing the poll
     ) -> bool:
         succeeded = False

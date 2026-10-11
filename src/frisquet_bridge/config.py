@@ -181,7 +181,7 @@ class BridgeConfig:
 
     def set_identity(
         self,
-        role: str, # "connect", "sonde", or "satellite_z1".."satellite_z3"
+        role: str,
         *,
         association_id: int, # association id already accepted by the boiler
         request_id: int, # outbound request id to resume from
@@ -369,7 +369,7 @@ def _load_identity(table: dict[str, object], field_name: str) -> DeviceIdentity:
 
 def _load_zone(
     table: dict[str, object],
-    field_name: str, # dotted name used in error messages
+    field_name: str,
     zone_number: int, # 1, 2 or 3; central_boiler is only valid on zone1
 ) -> ZoneConfig:
     _validate_keys(table, {"mode", "association_id"}, field_name)
@@ -405,7 +405,7 @@ def _validate_logging(config: LoggingConfig) -> None:
 def _validate_keys(
     table: dict[str, object],
     allowed: set[str],
-    field_name: str, # dotted name used in error messages
+    field_name: str,
 ) -> None:
     unknown = sorted(set(table) - allowed)
     if unknown:
@@ -449,8 +449,8 @@ def _positive_float(value: object, field_name: str) -> float:
 
 def _parse_hex_bytes(
     value: str,
-    length: int, # expected byte count after decoding
-    field_name: str, # dotted name used in error messages
+    length: int,
+    field_name: str,
 ) -> bytes:
     cleaned = value.replace(" ", "").lower()
     try: raw = bytes.fromhex(cleaned)

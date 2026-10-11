@@ -30,9 +30,9 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _send(
-    config_path: str, # config file path
-    temperature: float, # outside temperature in °C
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    config_path: str,
+    temperature: float,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     cfg = load(config_path)
     if cfg.sonde is None: raise ConfigError("outside-temp requires [frisquet.sonde]")

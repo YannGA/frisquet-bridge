@@ -185,7 +185,7 @@ def _frame_zone(frame: Frame) -> int | None:
 
 
 def _looks_like_zone_init(
-    payload: bytes, # INIT payload to inspect
+    payload: bytes,
     *, allow_length_prefixed: bool = False, # accept the short length-prefixed write form
 ) -> bool:
     if len(payload) >= 15 and payload[4:6] == b"\xa1\x54": return True

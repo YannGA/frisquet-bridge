@@ -252,11 +252,11 @@ class MqttAdapter:
 
     def __init__(
         self,
-        cfg: BridgeConfig, # bridge configuration
-        data: BoilerData, # live boiler, zone and RF state
-        ops: BoilerOps | None, # connect ops for boiler/zone writes, if paired
+        cfg: BridgeConfig,
+        data: BoilerData,
+        ops: BoilerOps | None,
         *,
-        sonde_ops: BoilerOps | None = None, # connect ops for the outside sensor, if paired
+        sonde_ops: BoilerOps | None = None,
         outside_temperature_writer: Callable[[float], Awaitable[bool]] | None = None, # alternative outside-sensor writer
         virtual_satellites: dict[int, VirtualSatellite] | None = None, # virtual zone -> satellite
         on_state_change: Callable[[], Awaitable[None]] | None = None, # republish state after a change
@@ -344,9 +344,9 @@ class MqttAdapter:
 
     async def _publish_discovery_payload(
         self,
-        client: aiomqtt.Client, # client to publish through
-        component: str, # HA component, e.g. "sensor"
-        entity_id: str, # entity id under the component
+        client: aiomqtt.Client,
+        component: str,
+        entity_id: str,
         payload: dict[str, Any], # discovery config payload
     ) -> bool:
         key = f"{component}.{entity_id}"
@@ -357,9 +357,9 @@ class MqttAdapter:
 
     async def _clear_discovery(
         self,
-        client: aiomqtt.Client, # client to publish through
-        component: str, # HA component
-        entity_id: str, # entity id under the component
+        client: aiomqtt.Client,
+        component: str,
+        entity_id: str,
     ) -> None:
         await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
 
@@ -638,9 +638,9 @@ class MqttAdapter:
 
     async def handle_message(
         self,
-        client: aiomqtt.Client, # client to publish through
-        topic: str, # MQTT topic the message arrived on
-        payload: str, # raw message body
+        client: aiomqtt.Client,
+        topic: str,
+        payload: str,
     ) -> None:
         body = payload.strip()
         if topic == "homeassistant/status":
@@ -671,9 +671,9 @@ class MqttAdapter:
 
     async def _handle_connect_zone_command(
         self,
-        zone: int, # zone number (1-3)
-        command: str, # mode, preset or targetTemperature
-        payload: str, # raw command value
+        zone: int,
+        command: str,
+        payload: str,
     ) -> None:
         assert self._ops is not None
         if command == "mode": await self._ops.apply_zone_climate(zone, self._data, hvac_mode=payload)
@@ -683,9 +683,9 @@ class MqttAdapter:
 
     async def _handle_virtual_zone_command(
         self,
-        zone: int, # zone number (1-3)
-        command: str, # mode, preset, targetTemperature or reportedAmbient
-        payload: str, # raw command value
+        zone: int,
+        command: str,
+        payload: str,
     ) -> None:
         satellite = self._virtual[zone]
         zs = self._data.zones[zone]

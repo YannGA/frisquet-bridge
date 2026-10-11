@@ -30,9 +30,9 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _pair(
-    config_path: str, # config file to load and store the pairing into
-    role: str, # device identity to pair, a key of PAIR_ROLES
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    config_path: str,
+    role: str,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     cfg = load(config_path)
     state = ProtocolState(network_id=b"\xff\xff\xff\xff", association_id=0xFF)

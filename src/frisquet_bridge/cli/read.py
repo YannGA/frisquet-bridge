@@ -28,8 +28,8 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _read(
-    config_path: str, # config file path
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    config_path: str,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     cfg = load(config_path)
     _require_connect_reader(cfg)
@@ -67,8 +67,8 @@ def _require_connect_reader(cfg: BridgeConfig) -> None:
 
 
 def _fmt(
-    value: object, # value to render, floats get one decimal
-    unit: str = "", # suffix appended to the rendered value
+    value: object,
+    unit: str = "",
 ) -> str:
     if value is None: return "n/a"
     if isinstance(value, float): return f"{value:.1f}{unit}"

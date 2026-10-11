@@ -18,10 +18,10 @@ class RawMessageRecorder:
 
     def __init__(
         self,
-        path: str, # JSONL file to append to (rotated in place)
+        path: str,
         *,
-        max_bytes: int, # rotate once the active file exceeds this many bytes
-        backup_count: int, # number of rotated backups to keep
+        max_bytes: int,
+        backup_count: int,
         include_lines: bool = False, # also record raw serial lines, not just frames
     ) -> None:
         self.include_lines = include_lines
@@ -49,12 +49,12 @@ class RawMessageRecorder:
 
     def record_frame(
         self,
-        direction: str, # "tx" or "rx"
+        direction: str,
         frame: Frame,
-        raw: bytes, # exact bytes on the wire
+        raw: bytes,
         *,
         rssi: int | None = None, # signal strength, on received frames only
-        outcome: str | None = None, # e.g. "attempt", "acked"
+        outcome: str | None = None,
     ) -> None:
         fields = {'direction': direction, 'raw_hex': raw.hex(), 'payload_hex': frame.payload_hex, 'payload_len': len(frame.payload),
             'to_addr': f'0x{frame.to_addr:02x}', 'to': device_name(frame.to_addr), 'from_addr': f'0x{frame.from_addr:02x}',
@@ -69,10 +69,10 @@ class RawMessageRecorder:
 def configure_logging(
     config: LoggingConfig,
     *,
-    level: str | None = None, # override for config.level
-    log_format: str | None = None, # override for config.format (json or console)
-    log_file: str | None = None, # override for config.file
-    raw_log_file: str | None = None, # override for config.raw_file
+    level: str | None = None,
+    log_format: str | None = None,
+    log_file: str | None = None,
+    raw_log_file: str | None = None,
 ) -> RawMessageRecorder | None:
     'Configure application logging and return an optional raw recorder.'
 

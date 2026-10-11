@@ -75,8 +75,8 @@ def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
 
 
 def save_zone_state(
-    path: Path, # sidecar file to read
-    data: BoilerData, # zones to populate in place
+    path: Path,
+    data: BoilerData,
 ) -> None:
     'Atomically persist any learned zone metadata to ``path``.'
     try:
@@ -90,8 +90,8 @@ def save_zone_state(
 
 
 def load_zone_state(
-    path: Path, # sidecar file to read
-    data: BoilerData, # zones to populate in place
+    path: Path,
+    data: BoilerData,
 ) -> None:
     'Populate ``data`` with previously-learned zone metadata, if present.'
     payload = _load_payload(path)
@@ -119,8 +119,8 @@ def load_protocol_request_ids(path: Path) -> dict[str, int]:
 
 
 def save_protocol_request_id(
-    path: Path, # sidecar file to read
-    role: str, # "connect", "sonde" or "satellite_z1".."satellite_z3"
+    path: Path,
+    role: str,
     request_id: int, # stored masked to one byte
 ) -> None:
     try:

@@ -35,9 +35,9 @@ ZONE_OPTS_BOOST_BIT = 0x40
 def _zone_mode_options(
     mode: ZoneMode,
     *,
-    auto_comfort: bool, # comfort (vs eco) within AUTO
-    override: bool, # AUTO derogated to a fixed level
-    boost: bool, # comfort boost within a fixed level
+    auto_comfort: bool,
+    override: bool,
+    boost: bool,
 ) -> int:
     if mode == ZoneMode.FROST: return ZONE_OPTS_FROST
     if mode == ZoneMode.AUTO and not override: return ZONE_OPTS_SCHEDULE
@@ -82,7 +82,7 @@ class BoilerOps:
         self,
         client: FrisquetClient,
         *,
-        boiler_addr: int, # boiler address (0x80/0x84) selecting the memory offset
+        boiler_addr: int,
         memory_offset: int = 0, # unused; the boiler address alone selects the offset
     ) -> None:
         self._client = client
@@ -94,12 +94,12 @@ class BoilerOps:
     async def _tracked(
         self,
         data: BoilerData,
-        operation: str, # operation name, the key in rf_operations
-        freshness_seconds: float, # health window, in seconds
+        operation: str,
+        freshness_seconds: float,
         fn: Callable[[], Awaitable], # coroutine performing the actual request
         *,
-        zone: int | None = None, # zone whose per-zone health to update, if any
-        response_rssi: bool = True, # attach the response RSSI to a recorded success
+        zone: int | None = None,
+        response_rssi: bool = True,
     ) -> _T:
         health = data.rf_health(operation, freshness_seconds=freshness_seconds, zone=zone)
         recorded_attempts = 0
@@ -142,10 +142,10 @@ class BoilerOps:
     async def _tracked_read(
         self,
         data: BoilerData,
-        operation: str, # operation name, the key in rf_operations
-        freshness_seconds: float, # health window, in seconds
+        operation: str,
+        freshness_seconds: float,
         address: int,
-        size: int, # number of bytes to read
+        size: int,
         decode: Callable[[bytes, BoilerData], None], # decoder populating data from the payload
         **kwargs: object, # forwarded to read_memory (timeout, retries, burst, ...)
     ) -> None:
@@ -190,8 +190,8 @@ class BoilerOps:
         self,
         data: BoilerData,
         *,
-        timeout: float = A029_TIMEOUT, # seconds to await each reply
-        retries: int = A029_RETRIES, # read attempts, each a 3-frame burst
+        timeout: float = A029_TIMEOUT,
+        retries: int = A029_RETRIES,
     ) -> None:
         # The old captured INIT body contained 0x010d, which is an ambient
         # temperature of 26.9°C, not part of the address. Replaying it here
@@ -202,7 +202,7 @@ class BoilerOps:
 
     async def ensure_zone_metadata(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
     ) -> None:
         # The boiler does not serve zone config to Connect; schedule/setpoints
@@ -227,16 +227,16 @@ class BoilerOps:
 
     async def write_zone_short(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
         *,
-        mode: ZoneMode | None = None, # mode to write; defaults to the learned one
-        boost: bool | None = None, # comfort boost; defaults to the learned one
-        override: bool | None = None, # AUTO derogation; defaults to the learned one
-        auto_comfort: bool | None = None, # comfort vs eco within AUTO; defaults to the learned one
-        comfort_temperature: float | None = None, # comfort setpoint; defaults to the learned one
-        reduced_temperature: float | None = None, # reduced setpoint; defaults to the learned one
-        frost_temperature: float | None = None, # frost setpoint; defaults to the learned one
+        mode: ZoneMode | None = None,
+        boost: bool | None = None,
+        override: bool | None = None,
+        auto_comfort: bool | None = None,
+        comfort_temperature: float | None = None,
+        reduced_temperature: float | None = None,
+        frost_temperature: float | None = None,
     ) -> None:
         'Send a short zone INIT (mode/setpoints) like OpenFrisquetVisio envoyerZone.'
         await self.ensure_zone_metadata(zone, data)
@@ -298,12 +298,12 @@ class BoilerOps:
 
     async def apply_zone_climate(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
         *,
-        hvac_mode: str | None = None, # HA HVAC mode string
-        preset: str | None = None, # HA preset string
-        target_temperature: float | None = None, # HA target temperature
+        hvac_mode: str | None = None,
+        preset: str | None = None,
+        target_temperature: float | None = None,
     ) -> None:
         await self.ensure_zone_metadata(zone, data)
         intent = resolve_zone_intent(data.zones[zone], hvac_mode=hvac_mode, preset=preset, target_temperature=target_temperature)
@@ -313,7 +313,7 @@ class BoilerOps:
 
     async def write_zone_mode(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
         mode: ZoneMode,
         *,
@@ -323,7 +323,7 @@ class BoilerOps:
 
     async def write_zone_boost(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
         boost: bool,
     ) -> None:
@@ -334,9 +334,9 @@ class BoilerOps:
 
     async def write_zone_override(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
-        value: str, # none/off/auto, comfort or reduced
+        value: str,
     ) -> None:
         normalized = value.strip().casefold().replace("é", "e").replace("_", " ").replace("-", " ")
         if normalized in {"none", "off", "clear", "auto"}:
@@ -353,7 +353,7 @@ class BoilerOps:
     async def write_outside_temperature(
         self,
         data: BoilerData,
-        temperature: float, # outside temperature, in °C
+        temperature: float,
     ) -> None:
         temp = max(-30.0, min(80.0, round(temperature * 10) / 10))
         body = SONDE_TEMP_PREFIX + encode_temp16(temp)
@@ -368,16 +368,16 @@ class BoilerOps:
 
     async def send_zone_consigne(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         data: BoilerData,
         *,
-        ambient: float, # measured room temperature to report
-        setpoint: float, # active setpoint to report
-        connect_compat: bool = False, # encode the mode as the official Connect app does
-        timeout: float = A029_TIMEOUT, # seconds to await each reply
-        retries: int = A029_RETRIES, # read attempts, each a 3-frame burst
-        burst: int = A029_BURST, # identical frames per attempt
-        burst_interval: float = A029_BURST_INTERVAL, # seconds between frames in a burst
+        ambient: float,
+        setpoint: float,
+        connect_compat: bool = False,
+        timeout: float = A029_TIMEOUT,
+        retries: int = A029_RETRIES,
+        burst: int = A029_BURST,
+        burst_interval: float = A029_BURST_INTERVAL,
     ) -> None:
         """Send a zone setpoint as a (virtual) satellite would (0xa02f write).
 
@@ -406,7 +406,7 @@ class BoilerOps:
 def ops_from_config(
     client: FrisquetClient,
     *,
-    boiler_addr: int, # boiler address (0x80/0x84) selecting the memory offset
+    boiler_addr: int,
     memory_offset: int, # unused; the boiler address alone selects the offset
 ) -> BoilerOps:
     return BoilerOps(client, boiler_addr=boiler_addr, memory_offset=memory_offset)
@@ -414,7 +414,7 @@ def ops_from_config(
 
 def _zone_schedule_bytes(
     data: BoilerData,
-    zone: int, # zone number (1-3)
+    zone: int,
 ) -> bytes | None:
     schedule = data.zones[zone].schedule
     if schedule is None: return None

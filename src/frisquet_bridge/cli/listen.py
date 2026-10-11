@@ -56,11 +56,11 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _listen(
-    port: str, # serial port to open
-    baud: int, # serial baud rate
+    port: str,
+    baud: int,
     network_id: str, # 4-byte sync word as hex
-    boiler_addr: int, # boiler RF address for passive decoding
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
+    boiler_addr: int,
+    raw_recorder: RawMessageRecorder | None = None,
 ) -> None:
     print(f"Opening {port} @ {baud}...")
     print(f"Sync word (NID): {network_id}")

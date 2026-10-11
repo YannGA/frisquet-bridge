@@ -210,7 +210,7 @@ class RfHealth:
     def record_success(
         self,
         *,
-        rssi: int | None = None, # signal strength observed with this success, if any
+        rssi: int | None = None,
     ) -> None:
         self.attempts += 1
         self.successes += 1
@@ -245,10 +245,10 @@ class BoilerData:
 
     def rf_health(
         self,
-        operation: str, # logical RF operation name
+        operation: str,
         *,
-        freshness_seconds: float, # age after which the operation counts as stale
-        zone: int | None = None, # zone the operation belongs to, if any
+        freshness_seconds: float,
+        zone: int | None = None,
     ) -> RfHealth:
         health = self.rf_operations.get(operation)
         if health is None:
