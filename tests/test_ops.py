@@ -362,3 +362,56 @@ async def test_apply_zone_climate_target_temperature(fake_transport: FakeTranspo
         await task
 
     assert data.zones[1].comfort_temperature == pytest.approx(21.0)
+
+
+class _RecordingClient:
+    """Records the reply budget each request is given, then fails like a lost frame."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def set_attempt_outcome_callback(self, callback: object) -> None:
+        return None
+
+    def reset_attempt_outcome_callback(self, token: object) -> None:
+        return None
+
+    async def request(self, **kwargs: object) -> Frame:
+        self.calls.append(kwargs)
+        raise RequestTimeout("no response")
+
+    async def read_memory(self, address: int, size: int, **kwargs: object) -> bytes:
+        self.calls.append({"address": address, "size": size, **kwargs})
+        raise RequestTimeout("no response")
+
+
+async def test_send_zone_consigne_uses_the_short_a029_reply_budget() -> None:
+    # Measured live: the 0xa029 exchange answers ~20% of attempts while replies
+    # arrive in 148-750 ms, so the 5 s client default held the shared radio lock
+    # for up to 15 s per lost consigne send.
+    client = _RecordingClient()
+    ops = BoilerOps(client, boiler_addr=0x80)  # type: ignore[arg-type]
+    data = BoilerData()
+    data.zones[1].mode = ZoneMode.AUTO
+    data.zones[1].auto_comfort = False
+
+    with pytest.raises(RequestTimeout):
+        await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
+
+    assert client.calls[0]["timeout"] == ops_module.A029_TIMEOUT
+    assert client.calls[0]["retries"] == ops_module.A029_RETRIES
+    assert ops_module.A029_TIMEOUT < 5.0
+    # The three attempts stay: ~20% per-attempt success means dropping one would
+    # cut consigne delivery by about a quarter.
+    assert ops_module.A029_RETRIES == 3
+
+
+async def test_read_satellite_info_uses_the_short_a029_reply_budget() -> None:
+    client = _RecordingClient()
+    ops = BoilerOps(client, boiler_addr=0x80)  # type: ignore[arg-type]
+
+    with pytest.raises(RequestTimeout):
+        await ops.read_satellite_info(BoilerData())
+
+    assert client.calls[0]["timeout"] == ops_module.A029_TIMEOUT
+    assert client.calls[0]["retries"] == ops_module.A029_RETRIES

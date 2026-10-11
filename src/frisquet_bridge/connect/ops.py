@@ -63,6 +63,16 @@ def _zone_mode_options(mode: ZoneMode, *, auto_comfort: bool, override: bool, bo
 # the write several times spaced ~1.5s apart rather than in one tight burst.
 ZONE_WRITE_REPEATS = 6
 ZONE_WRITE_INTERVAL = 1.5
+# The 0xa029/0xa02f exchange is the one lossy operation on this link: measured
+# over 37 days of live RF capture it answers ~20% of attempts, while the replies
+# that do arrive come back in 148-750 ms. The client default (5 s timeout, 3
+# attempts) therefore held the radio lock shared by every other client for up to
+# 15 s per lost send. Only the wait is trimmed here: a lost attempt now costs
+# 1.5 s. The three attempts are kept deliberately - with ~20% per-attempt
+# success, dropping one would cut consigne delivery by roughly a quarter, and
+# the scheduler re-sends on change and every ten minutes anyway.
+A029_TIMEOUT = 1.5
+A029_RETRIES = 3
 log = structlog.get_logger(__name__)
 _T = TypeVar("_T")
 
@@ -222,8 +232,8 @@ class BoilerOps:
         self,
         data: BoilerData,
         *,
-        timeout: float = 5.0,
-        retries: int = 3,
+        timeout: float = A029_TIMEOUT,
+        retries: int = A029_RETRIES,
     ) -> None:
         # The old captured INIT body contained 0x010d, which is an ambient
         # temperature of 26.9°C, not part of the address. Replaying it here
@@ -431,6 +441,8 @@ class BoilerOps:
         ambient: float,
         setpoint: float,
         connect_compat: bool = False,
+        timeout: float = A029_TIMEOUT,
+        retries: int = A029_RETRIES,
     ) -> None:
         """Send a zone setpoint as a (virtual) satellite would (0xa02f write).
 
@@ -443,8 +455,15 @@ class BoilerOps:
         write_addr = self._addr(ADDR_SATELLITE_CONSIGNE) + 0x0005 * (zone - 1)
         body = struct.pack(">HHHHB", self._addr(ADDR_SATELLITE_INFO), 0x0015, write_addr, 0x0004, 0x08)
         body += encode_temp16(ambient) + encode_temp16(setpoint) + bytes((0x00, mode_byte)) + struct.pack(">H", 0x0000)
+
         async def request_and_decode() -> None:
-            response = await self._client.request(control=0x01, msg_type=MSG_INIT, payload=body)
+            response = await self._client.request(
+                control=0x01,
+                msg_type=MSG_INIT,
+                payload=body,
+                timeout=timeout,
+                retries=retries,
+            )
             decode_satellite_init_response(response.payload, data)
 
         await self._tracked(
