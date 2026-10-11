@@ -165,6 +165,16 @@ There is **no** "read zone configuration" exchange the boiler answers directly �
 the zone schedule and comfort/reduced/frost setpoints can only be learned
 **passively** by sniffing a satellite's `0xa154` broadcast.
 
+**How often the values actually change.** The boiler refreshes its state on its
+own ~5-minute tick, so polling faster only re-reads the same bytes. Measured over
+145 h of captures (17,165 reads), the sensor block (`0x79e0`) changed 1,856
+times: median gap 300 s, mean 4.7 min — 69% of gaps ≈5 min, 10% ≈10 min, 17%
+under 1.5 min (the burner running makes pressure, flue temperature and heating
+power move on almost every poll). Per-field medians: ≈300 s for
+`dhw_instant_temperature`, ≈600 s for `dhw`/`cdc`/`cdc_safety` temperature,
+≈46 min for consumption, ≈2.5 h for the daily counters. A 30 s poll already
+sees every change.
+
 ### 6.2 Connect writes a zone (unreliable; relayed)
 
 ```
