@@ -54,9 +54,11 @@ static bool radioInit() {
 
   rf69.setTxPower(20, true);
 
+  // RxBw/AfcBw 0x41 = mantissa 16, exponent 1 -> 250 kHz, the bandwidth the
+  // reference receiver uses. 0x51 (mantissa 24) was 166.7 kHz.
   const RH_RF69::ModemConfig config{
       CONFIG_FSK, 0x05, 0x00, 0x03, 0x34,
-      0b01010001, 0b01010001, CONFIG_WHITE};
+      0b01000001, 0b01000001, CONFIG_WHITE};
   rf69.setModemRegisters(&config);
   rf69.setPreambleLength(4);
 
