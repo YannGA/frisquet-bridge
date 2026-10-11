@@ -114,7 +114,6 @@ address + length. Blocks seen in practice:
 | `0xa154` | Zone configuration: comfort/reduced/frost setpoints, mode, options, weekly schedule (zone 1; zones 2/3 are offset). |
 | `0xa029` | Satellite/boiler state block returned to a satellite (outside temp, date, boiler status, per-zone setpoints). |
 | `0xa02f` | A satellite's setpoint **consigne** write (ambient + active setpoint + mode). |
-| `0xa0f0` | Holiday / vacances schedule (abbreviated on `MEMORY_PUSH`; full block on Connect `INIT` write). |
 | `0xa0fc` | DHW (ECS) mode. |
 | `0x79fc`, … | Boiler sensor / consumption / clock blocks read by the Connect. |
 
@@ -222,30 +221,21 @@ Observed behaviour from long captures:
   `addr(2) | len(2) | body` layout as a `READ` response. The Connect ACK echoes
   only `addr+len` (4 bytes).
 
-  Block **`0xa0f0`** is the **holiday / derogation ("vacances")** block, pushed
-  with a 13-byte body: `marker(1)=0x1a | start(4) | mid(4) | end(4)`. `start` and
-  `end` are 4-byte **Frisquet timestamps** (byte order `2,3,0,1`, seconds since
-  the Unix epoch). When no holiday is scheduled the date fields are all zero.
-
-  > Important: the boiler **also** pushes `0xa0f0` with an empty (all-zero) date
-  > body when an *unrelated* program / manual-mode / DHW change is committed — so
-  > a zero body means "no holiday dates", **not** a holiday-off command. The byte
-  > right after the length-delimited body is a **change-toggle flag** whose `0x80`
-  > bit flips on each commit (low nibble has been `0x08`); it is not holiday state.
-  > Captured: `logs/re/holiday-on.raw.jsonl` (dates), `manual-mode` and
-  > `ecs-stop-night-77-23-4` (zero body, toggling flag).
-
   DHW/ECS mode (block `0xa0fc`) was **not** observed as a `0x10` push on this
-  installation — cycling ECS produced only zero-body `0xa0f0` pushes. The ECS
-  options on this boiler also differ from the Frisquet Connect app's set, so the
-  `DhwMode` enum decode is treated as model-specific / unverified here.
+  installation — cycling ECS produced only `0xa0f0` pushes with a zero body. The
+  ECS options on this boiler also differ from the Frisquet Connect app's set, so
+  the `DhwMode` enum decode is treated as model-specific / unverified here. The
+  `0xa0f0` block itself is pushed on unrelated program/manual changes and is not
+  decoded.
 
 - **`BOILER_EVENT` (`0x45`)** is a fixed **21-byte** notification tied to the
-  configuration area tagged **`0x0a8031`** (the same tag embedded in the
-  `0x7a18` daily-consumption block the Connect reads every ~20 minutes). Layout:
+  boiler's parameter block: tags `0x0a8030`, `0x0a8031` and `0x0a8032` were each
+  observed, sent three times in a row, so the tag identifies *which* word of the
+  block the event refers to (the same tags appear in the `0x7a18`
+  daily-consumption block the Connect reads every ~20 minutes). Layout:
 
   ```
-  [kind u8][tag 0x0a8031][stamp 4B][tail 13B]
+  [kind u8][tag 3B][stamp 4B][tail 13B]
   ```
 
   `kind` **`0x02`** = clear, **`0x01`** = set; the boiler emits a `clear→set`
@@ -253,7 +243,7 @@ Observed behaviour from long captures:
   **only** push produced by changing the **maximum temperature**, so `0x45`
   correlates with a max-temperature / boiler-parameter change. The 4-byte
   `stamp` increments between the pair (low byte `ac→ad`) but is **not** a plain
-  timestamp (it decodes to year 2001 under the holiday byte order). The changed
+  timestamp (it decodes to year 2001 under the 4-byte timestamp byte order). The changed
   value has not yet been localized — `tail` was all-zero in the clean capture —
   so the payload beyond `kind` is currently treated as opaque. (An earlier mixed
   capture showed a `0x40` bit in the tail; that is **unconfirmed** as boost.)

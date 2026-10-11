@@ -190,7 +190,6 @@ class BoilerState:
     daily_heating_consumption: int | None = None
     dhw_mode: DhwMode | None = None
     dhw_frame_bits: int = 0
-    holiday_active: bool | None = None
     status: BoilerStatus | None = None
     fault: bool = False
 

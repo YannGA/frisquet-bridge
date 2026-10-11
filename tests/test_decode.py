@@ -9,14 +9,11 @@ from frisquet_bridge.connect.decode import (
     decode_consumption,
     decode_daily_consumption,
     decode_dhw_mode,
-    decode_holiday_push,
-    decode_memory_push,
     decode_satellite_info,
     decode_sensors,
     decode_zone_consigne,
     decode_zone_init,
     describe_boiler_event,
-    describe_memory_push,
     encode_satellite_mode,
     parse_boiler_event_push,
     parse_memory_push,
@@ -37,14 +34,6 @@ ZONE_INIT_PUSH = bytes.fromhex(
     "a1540015a154001830"
     "91821e08100000e0ffffffff00e0ffffff7f00e0ffffff7f"
     "00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffffff"
-)
-# The 0xa0f0 block is pushed for holiday AND unrelated program/manual/DHW
-# changes; the trailing byte is a change-toggle flag.
-HOLIDAY_NONE_PUSH = bytes.fromhex(
-    "a0f0000d1a0000000000000000000000000000000000000000000000000088"
-)
-HOLIDAY_ON_PUSH = bytes.fromhex(
-    "a0f0000d1acc806a39000000001e006a3b0000000000000000000000000088"
 )
 # max-temp experiment: clear then set, all-zero tail (no boost bit).
 BOILER_EVENT_CLEAR = bytes.fromhex("020a8031ac553a6a00000000000000000000000000")
@@ -278,21 +267,13 @@ def test_encode_satellite_mode():
         encode_satellite_mode(zone)
 
 
-def test_memory_push_holiday():
-    data = BoilerData()
-    push = decode_memory_push(HOLIDAY_NONE_PUSH, data)
-    assert (push.address, push.length, len(push.body), push.toggle_flag) == (0xA0F0, 0x000D, 13, 0x88)
-    assert data.boiler.holiday_active is False
-    text = describe_memory_push(HOLIDAY_NONE_PUSH)
-    assert "holiday=none" in text and "flag=0x88" in text
-
-    data = BoilerData()
-    holiday = decode_holiday_push(parse_memory_push(HOLIDAY_ON_PUSH).body, data)
-    assert holiday.active is True and data.boiler.holiday_active is True
-    assert holiday.start.isoformat(timespec="seconds") == "2026-06-23T00:00:00+00:00"
-    assert holiday.end.isoformat(timespec="seconds") == "2026-06-24T00:00:00+00:00"
-    text = describe_memory_push(HOLIDAY_ON_PUSH)
-    assert "holiday=on" in text and "2026-06-23T00:00:00+00:00" in text and "2026-06-24T00:00:00+00:00" in text
+def test_parse_memory_push_framing():
+    push = parse_memory_push(
+        bytes.fromhex("a0f0000d1a0000000000000000000000000000000000000000000000000088")
+    )
+    assert (push.address, push.length, len(push.body)) == (0xA0F0, 0x000D, 13)
+    with pytest.raises(ValueError, match="truncated"):
+        parse_memory_push(bytes.fromhex("79e00015aabb"))
 
 
 def test_boiler_event_push():

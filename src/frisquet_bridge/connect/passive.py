@@ -9,7 +9,6 @@ from frisquet_bridge.connect.decode import (
     ADDR_DAILY_CONSUMPTION,
     ADDR_DATE,
     ADDR_DHW_MODE,
-    ADDR_HOLIDAY,
     ADDR_SENSORS,
     ADDR_SENSORS_APP,
     decode_clock,
@@ -124,7 +123,6 @@ def read_addr_name(
     if addr in memory_addrs(ADDR_CONSUMPTION, boiler_addr): return "consumption"
     if addr in memory_addrs(ADDR_DAILY_CONSUMPTION, boiler_addr): return "daily_consumption"
     if addr in memory_addrs(ADDR_DHW_MODE, boiler_addr): return "dhw_mode"
-    if addr in memory_addrs(ADDR_HOLIDAY, boiler_addr): return "holiday"
     if addr in memory_addrs(ADDR_DATE, boiler_addr): return "clock"
     return None
 

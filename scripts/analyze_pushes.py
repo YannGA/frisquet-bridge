@@ -117,7 +117,7 @@ def _print_matrix(frames: list[PushFrame], *, stamp_delta: bool) -> None:
         print(f"  {ts_short} req=0x{frame.request_id:02x}{rssi}  {' '.join(cells)}")
 
     if stamp_delta and frames[0].msg_type == 0x45 and width >= 8:
-        print("  stamp field (bytes 4-7, holiday byte order 2,3,0,1):")
+        print("  stamp field (bytes 4-7, byte order 2,3,0,1):")
         prev: tuple[str, int | None] | None = None
         for frame in frames:
             stamp = _stamp_guess(frame.payload[4:8])

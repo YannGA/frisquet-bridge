@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from frisquet_bridge.connect.codec import BoilerDate, decode_pressure16, decode_temp16, decode_temp8
 from frisquet_bridge.model import (
@@ -30,15 +29,7 @@ ADDR_SATELLITE_INFO = 0xA029
 # Per-zone satellite setpoint block: zone 1 at 0xa02f, +5 per zone.
 ADDR_SATELLITE_CONSIGNE = 0xA02F
 ADDR_ZONE_CONFIG = 0xA154
-# 0xa0f0 is the holiday / derogation ("vacances") block. The boiler also pushes
-# it (with an empty date body) whenever a related program/manual/DHW change is
-# committed, so a zero body means "no holiday dates", not "holiday off command".
-ADDR_HOLIDAY = 0xA0F0
 BOILER_ALT_OFFSET = 0xC8
-# Body marker / inner length byte seen at the start of the 0xa0f0 push body.
-HOLIDAY_BODY_MARKER = 0x1A
-# Tag embedded in the 0x45 BOILER_EVENT (also present in the 0x7a18 daily block).
-BOILER_EVENT_MEMORY_TAG = bytes((0x0A, 0x80, 0x31))
 BOILER_EVENT_KIND_SET = 0x01
 BOILER_EVENT_KIND_CLEAR = 0x02
 TEMP16_ABSENT = 127.0
@@ -352,30 +343,11 @@ def _decode_satellite_mode(raw: int) -> tuple[ZoneMode, bool | None, bool] | Non
 
 @dataclass(frozen=True, slots=True)
 class MemoryPush:
-    """Boiler-initiated memory block update (msg_type 0x10).
-
-    ``trailer`` is the region after the length-delimited ``body``. For the
-    0xa0f0 block the last trailer byte carries a change-toggle flag (the 0x80
-    bit flips on each committed change; the low nibble has been 0x08).
-    """
+    """Boiler-initiated memory block update (msg_type 0x10)."""
 
     address: int
     length: int
     body: bytes
-    trailer: bytes = b""
-
-    @property
-    def toggle_flag(self) -> int | None:
-        return self.trailer[-1] if self.trailer else None
-
-
-@dataclass(frozen=True, slots=True)
-class HolidayPush:
-    """Decoded 0xa0f0 holiday/derogation body."""
-
-    active: bool
-    start: datetime | None
-    end: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,8 +388,7 @@ def parse_memory_push(payload: bytes) -> MemoryPush:
     body = payload[4 : 4 + length]
     if len(body) != length:
         raise ValueError(f"memory push truncated: expected {length} body bytes, got {len(body)}")
-    trailer = payload[4 + length :]
-    return MemoryPush(address=address, length=length, body=body, trailer=trailer)
+    return MemoryPush(address=address, length=length, body=body)
 
 
 def parse_boiler_event_push(payload: bytes) -> BoilerEventPush:
@@ -431,36 +402,6 @@ def parse_boiler_event_push(payload: bytes) -> BoilerEventPush:
     )
 
 
-def decode_frisquet_timestamp(data: bytes) -> datetime | None:
-    """Decode the 4-byte Frisquet timestamp (holiday.rs byte order 2,3,0,1)."""
-    if len(data) < 4:
-        return None
-    secs = (data[2] << 24) + (data[3] << 16) + (data[0] << 8) + data[1]
-    try:
-        return datetime.fromtimestamp(secs, tz=UTC)
-    except (OverflowError, OSError, ValueError):
-        return None
-
-
-def decode_holiday_push(body: bytes, data: BoilerData) -> HolidayPush:
-    """Decode the 0xa0f0 holiday body: ``marker(1) start(4) mid(4) end(4)``.
-
-    Holiday is considered active when the start date field is non-zero. A fully
-    zeroed date body means no holiday is scheduled (the boiler also emits this
-    form on unrelated program/manual/DHW commits, so it is not a holiday-off
-    command in itself).
-    """
-    if len(body) < 13:
-        raise ValueError(f"holiday push body too short: {len(body)} bytes")
-    start_raw = body[1:5]
-    end_raw = body[9:13]
-    active = start_raw != b"\x00\x00\x00\x00"
-    start = decode_frisquet_timestamp(start_raw) if active else None
-    end = decode_frisquet_timestamp(end_raw) if active else None
-    data.boiler.holiday_active = active
-    return HolidayPush(active=active, start=start, end=end)
-
-
 def decode_memory_push(
     payload: bytes, # MEMORY_PUSH (0x10) payload
     data: BoilerData, # BoilerData to update for known blocks
@@ -469,16 +410,9 @@ def decode_memory_push(
 ) -> MemoryPush:
     """Parse a MEMORY_PUSH (0x10) and update ``data`` when the block is known."""
     push = parse_memory_push(payload)
-    if push.address in memory_addrs(ADDR_HOLIDAY, boiler_addr):
-        decode_holiday_push(push.body, data)
-    elif push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
+    if push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
         decode_dhw_mode(push.body, data)
     return push
-
-
-def decode_boiler_event(payload: bytes, data: BoilerData) -> BoilerEventPush:
-    """Parse a BOILER_EVENT (0x45). Currently informational only (see class)."""
-    return parse_boiler_event_push(payload)
 
 
 def memory_push_block_name(
@@ -486,8 +420,6 @@ def memory_push_block_name(
     *,
     boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
 ) -> str | None:
-    if address in memory_addrs(ADDR_HOLIDAY, boiler_addr):
-        return "holiday"
     if address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
         return "dhw_mode"
     return None
@@ -507,24 +439,7 @@ def describe_memory_push(
     name = memory_push_block_name(push.address, boiler_addr=boiler_addr) or f"0x{push.address:04x}"
     parts = [f"MEMORY_PUSH addr={name} len=0x{push.length:04x}"]
 
-    if push.address in memory_addrs(ADDR_HOLIDAY, boiler_addr):
-        try:
-            holiday = decode_holiday_push(push.body, data)
-        except ValueError:
-            holiday = None
-        if holiday is None:
-            parts.append(f"body={push.body.hex()}")
-        elif holiday.active:
-            parts.append("holiday=on")
-            if holiday.start is not None:
-                parts.append(f"start={holiday.start.isoformat(timespec='seconds')}")
-            if holiday.end is not None:
-                parts.append(f"end={holiday.end.isoformat(timespec='seconds')}")
-        else:
-            parts.append("holiday=none")
-        if push.toggle_flag is not None:
-            parts.append(f"flag=0x{push.toggle_flag:02x}")
-    elif push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
+    if push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
         decode_dhw_mode(push.body, data)
         mode = data.boiler.dhw_mode.value if data.boiler.dhw_mode is not None else "unknown"
         parts.append(f"dhw_mode={mode}")

@@ -14,7 +14,6 @@ RX_RE = re.compile(r"^RX (-?\d+) ([0-9a-fA-F]+) ([0-9a-fA-F]{2})$")
 OK_RE = re.compile(r"^OK (\d+)$")
 ERR_RE = re.compile(r"^ERR (\d+) (\S+)$")
 PONG_RE = re.compile(r"^PONG (\d+)$")
-INFO_RE = re.compile(r"^INFO (\S+) (.*)$")
 READY_RE = re.compile(r"^READY (\S+) (\S+)$")
 
 
