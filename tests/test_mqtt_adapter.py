@@ -1,4 +1,4 @@
-"""Tests for MQTT command mapping and the Home Assistant MQTT contract."""
+'Tests for MQTT command mapping and the Home Assistant MQTT contract.'
 
 import asyncio, json
 
@@ -11,8 +11,7 @@ from frisquet_bridge.mqtt.adapter import MqttAdapter
 
 
 class FakeOps:
-    def __init__(self):
-        self.calls = []
+    def __init__(self): self.calls = []
 
     async def write_dhw_mode(self, data, mode):
         self.calls.append(("dhw", mode))
@@ -20,8 +19,7 @@ class FakeOps:
 
     async def apply_zone_climate(self, zone, data, *, hvac_mode=None, preset=None, target_temperature=None):
         self.calls.append(("climate", zone, hvac_mode, preset, target_temperature))
-        if hvac_mode == "auto":
-            data.zones[zone].mode = ZoneMode.AUTO
+        if hvac_mode == "auto": data.zones[zone].mode = ZoneMode.AUTO
         if preset == "comfort":
             data.zones[zone].override = True
             data.zones[zone].auto_comfort = True
@@ -40,8 +38,7 @@ class SlowDhwOps(FakeOps):
 
 
 class FakeSatellite:
-    def __init__(self):
-        self.sends = 0
+    def __init__(self): self.sends = 0
 
     async def send_now(self):
         self.sends += 1
@@ -49,31 +46,23 @@ class FakeSatellite:
 
 
 class FakeMqttClient:
-    def __init__(self):
-        self.published = []
+    def __init__(self): self.published = []
 
-    async def publish(self, topic, payload, retain=False):
-        self.published.append((topic, payload, retain))
+    async def publish(self, topic, payload, retain=False): self.published.append((topic, payload, retain))
 
 
 def _config(tmp_path, connect_mode=None, zone_mode=None):
     cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
     if connect_mode is not None:
         cfg.connect = ConnectConfig(mode=connect_mode, identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    if zone_mode is not None:
-        cfg.zone1 = ZoneConfig(mode=zone_mode)
+    if zone_mode is not None: cfg.zone1 = ZoneConfig(mode=zone_mode)
     return cfg
 
 
 def _persisting_adapter(tmp_path, zone_mode, connect_mode="read"):
     data, satellite, persisted = BoilerData(), FakeSatellite(), []
-    adapter = MqttAdapter(
-        _config(tmp_path, connect_mode, zone_mode),
-        data,
-        None,
-        virtual_satellites={1: satellite},
-        on_persist_state=lambda: persisted.append("saved"),
-    )
+    adapter = MqttAdapter(_config(tmp_path, connect_mode, zone_mode), data, None, virtual_satellites={1: satellite},
+        on_persist_state=lambda: persisted.append('saved'))
     return adapter, data, satellite, persisted
 
 
@@ -105,8 +94,7 @@ async def test_handle_command_maps_topics_to_writes(adapter, tmp_path):
         ("dhw", DhwMode.ECO_SCHEDULE),
         ("climate", 1, HVAC_AUTO, None, None),
         ("climate", 1, None, PRESET_COMFORT, None),
-        ("climate", 1, None, None, 21.0),
-    ]
+        ("climate", 1, None, None, 21.0)]
 
     writes = []
 
@@ -175,8 +163,7 @@ async def test_zone_commands_route_by_profile(tmp_path, virtual_adapter, satelli
         20.0,
         4.0,
         1.0,
-        True,
-    )
+        True,)
     assert satellite.sends == 4
     assert persisted == ["saved"] * 4
 
@@ -219,19 +206,14 @@ async def test_discovery_topics_and_entity_metadata(adapter, tmp_path):
     mqtt, _data, _ops = adapter
     client = FakeMqttClient()
     await mqtt.publish_discovery(client)
-    payloads = {
-        topic: json.loads(payload)
-        for topic, payload, _retain in client.published
-        if topic.startswith("homeassistant/") and payload
-    }
+    payloads = {topic: json.loads(payload) for topic, payload, _retain in client.published if topic.startswith('homeassistant/') and payload}
     dhw_temperature = payloads["homeassistant/sensor/frisquet_bridge/dhw_temperature/config"]
     assert dhw_temperature["availability_topic"] == "frisquet/frisquet_bridge/availability"
     assert (dhw_temperature["payload_available"], dhw_temperature["payload_not_available"]) == ("online", "offline")
     assert (dhw_temperature["state_class"], dhw_temperature["suggested_display_precision"]) == ("measurement", 1)
     assert dhw_temperature["name"] == "Boiler DHW temperature"
     assert payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]["name"] == (
-        "Boiler heating body safety probe temperature"
-    )
+        "Boiler heating body safety probe temperature")
     assert payloads["homeassistant/sensor/frisquet_bridge/dhw_consumption/config"]["state_class"] == "total_increasing"
     assert payloads["homeassistant/sensor/frisquet_bridge/daily_dhw_consumption/config"]["name"] == "Boiler DHW previous day consumption"
     assert payloads["homeassistant/sensor/frisquet_bridge/boiler_status/config"]["state_topic"] == "frisquet/boiler/status"
@@ -243,8 +225,7 @@ async def test_discovery_topics_and_entity_metadata(adapter, tmp_path):
     assert (flow["name"], flow["state_topic"], flow["unique_id"]) == (
         "Zone 1 flow temperature",
         "frisquet/z1/flowTemperature",
-        "frisquet_bridge_zone1_flow_temperature",
-    )
+        "frisquet_bridge_zone1_flow_temperature",)
     for payload in payloads.values():
         assert payload["device"]["identifiers"] == ["frisquet_bridge"]
         assert payload["origin"] == {"name": "frisquet-bridge"}
@@ -277,11 +258,7 @@ async def test_discovery_localizes_french_names_and_dhw_options(tmp_path):
     mqtt = MqttAdapter(cfg, BoilerData(), FakeOps(), virtual_satellites={1: FakeSatellite()})
     client = FakeMqttClient()
     await mqtt.publish_discovery(client)
-    payloads = {
-        topic: json.loads(payload)
-        for topic, payload, _retain in client.published
-        if topic.startswith("homeassistant/") and payload
-    }
+    payloads = {topic: json.loads(payload) for topic, payload, _retain in client.published if topic.startswith('homeassistant/') and payload}
     assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["name"] == "Chaudière mode ECS"
     assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["options"] == ["Max", "Eco", "Eco Horaires", "Stop"]
     safety = payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]

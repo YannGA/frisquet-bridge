@@ -1,4 +1,4 @@
-"""Home Assistant climate mapping for Frisquet heating zones (pure logic, no I/O)."""
+'Home Assistant climate mapping for Frisquet heating zones (pure logic, no I/O).'
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ ACTION_OFF = "off"
 
 
 class ClimateError(ValueError):
-    """Invalid climate command or state."""
+    'Invalid climate command or state.'
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,42 +43,33 @@ class ZoneIntent:
 
 def parse_hvac_mode(value: str) -> str:
     normalized = value.strip().casefold()
-    if normalized not in HVAC_MODES:
-        raise ClimateError(f"unknown hvac mode {value!r}; expected one of: {', '.join(HVAC_MODES)}")
+    if normalized not in HVAC_MODES: raise ClimateError(f"unknown hvac mode {value!r}; expected one of: {', '.join(HVAC_MODES)}")
     return normalized
 
 
 def parse_preset(value: str) -> str:
     normalized = value.strip().casefold()
-    if normalized not in _VALID_PRESETS:
-        raise ClimateError(f"unknown preset {value!r}; expected one of: {', '.join(_VALID_PRESETS)}")
+    if normalized not in _VALID_PRESETS: raise ClimateError(f"unknown preset {value!r}; expected one of: {', '.join(_VALID_PRESETS)}")
     return normalized
 
 
 def zone_hvac_mode(zone: ZoneState) -> str | None:
-    if zone.mode is None:
-        return None
-    if zone.mode == ZoneMode.FROST:
-        return HVAC_OFF
-    if zone.mode == ZoneMode.AUTO:
-        return HVAC_AUTO
+    if zone.mode is None: return None
+    if zone.mode == ZoneMode.FROST: return HVAC_OFF
+    if zone.mode == ZoneMode.AUTO: return HVAC_AUTO
     return HVAC_HEAT
 
 
 def zone_preset(zone: ZoneState) -> str | None:
-    if zone.mode is None:
-        return None
-    if zone.mode == ZoneMode.FROST:
-        return PRESET_NONE
+    if zone.mode is None: return None
+    if zone.mode == ZoneMode.FROST: return PRESET_NONE
     if zone.mode == ZoneMode.AUTO:
         # In auto we surface the level the program (or an active derogation) is
         # currently applying, so the card shows comfort/eco that matches the
         # schedule slot rather than a static "schedule" label.
         return _auto_active_preset(zone)
-    if zone.mode == ZoneMode.COMFORT:
-        return PRESET_BOOST if zone.boost else PRESET_COMFORT
-    if zone.mode == ZoneMode.REDUCED:
-        return PRESET_ECO
+    if zone.mode == ZoneMode.COMFORT: return PRESET_BOOST if zone.boost else PRESET_COMFORT
+    if zone.mode == ZoneMode.REDUCED: return PRESET_ECO
     return None
 
 
@@ -94,12 +85,9 @@ def _auto_active_preset(zone: ZoneState) -> str:
     reduced = zone.reduced_temperature
     if setpoint is not None and comfort is not None and reduced is not None and abs(comfort - reduced) > 0.2:
         return PRESET_COMFORT if abs(setpoint - comfort) <= abs(setpoint - reduced) else PRESET_ECO
-    if zone.override:
-        return PRESET_COMFORT if zone.auto_comfort else PRESET_ECO
-    if zone.auto_comfort is True:
-        return PRESET_COMFORT
-    if zone.auto_comfort is False:
-        return PRESET_ECO
+    if zone.override: return PRESET_COMFORT if zone.auto_comfort else PRESET_ECO
+    if zone.auto_comfort is True: return PRESET_COMFORT
+    if zone.auto_comfort is False: return PRESET_ECO
     return PRESET_NONE
 
 
@@ -107,39 +95,29 @@ def zone_hvac_action(
     zone: ZoneState, # zone to classify
     boiler: BoilerState, # fallback when the zone reports no ambient/setpoint
 ) -> str | None:
-    if zone.mode is None:
-        return None
-    if zone.mode == ZoneMode.FROST:
-        return ACTION_OFF
+    if zone.mode is None: return None
+    if zone.mode == ZoneMode.FROST: return ACTION_OFF
     ambient = zone.ambient_temperature
     setpoint = zone.setpoint_temperature
     if ambient is None or setpoint is None:
-        if boiler.status is not None and boiler.status.value == "Running":
-            return ACTION_HEATING
+        if boiler.status is not None and boiler.status.value == "Running": return ACTION_HEATING
         return ACTION_IDLE
-    if setpoint > ambient:
-        return ACTION_HEATING
+    if setpoint > ambient: return ACTION_HEATING
     return ACTION_IDLE
 
 
 def zone_target_temperature(zone: ZoneState) -> float | None:
-    if zone.mode is None:
-        return None
-    if zone.mode == ZoneMode.FROST:
-        return zone.frost_temperature
+    if zone.mode is None: return None
+    if zone.mode == ZoneMode.FROST: return zone.frost_temperature
     if zone.mode == ZoneMode.COMFORT:
         base = zone.comfort_temperature
-        if zone.boost and base is not None:
-            return base + 2.0
+        if zone.boost and base is not None: return base + 2.0
         return base
-    if zone.mode == ZoneMode.REDUCED:
-        return zone.reduced_temperature
+    if zone.mode == ZoneMode.REDUCED: return zone.reduced_temperature
     # AUTO: follow the boiler's live setpoint when known (tracks the program /
     # any derogation); otherwise fall back to the relevant fixed setpoint.
-    if zone.setpoint_temperature is not None:
-        return zone.setpoint_temperature
-    if zone.auto_comfort is False:
-        return zone.reduced_temperature
+    if zone.setpoint_temperature is not None: return zone.setpoint_temperature
+    if zone.auto_comfort is False: return zone.reduced_temperature
     return zone.comfort_temperature
 
 
@@ -150,7 +128,7 @@ def resolve_zone_intent(
     preset: str | None = None, # HA preset command, or None to keep the zone's preset
     target_temperature: float | None = None, # HA target, or None to leave setpoints untouched
 ) -> ZoneIntent:
-    """Reconcile HA climate command(s) against current zone state."""
+    'Reconcile HA climate command(s) against current zone state.'
     current_hvac = zone_hvac_mode(zone) or HVAC_AUTO
     current_preset = zone_preset(zone) or PRESET_NONE
 
@@ -164,29 +142,13 @@ def resolve_zone_intent(
     frost = zone.frost_temperature
 
     if target_temperature is not None:
-        comfort, reduced, frost = _apply_target_temperature(
-            target_temperature,
-            mode=mode,
-            boost=boost,
-            override=override,
-            auto_comfort=auto_comfort,
-            comfort=comfort,
-            reduced=reduced,
-            frost=frost,
-        )
+        comfort, reduced, frost = _apply_target_temperature(target_temperature, mode=mode, boost=boost, override=override,
+            auto_comfort=auto_comfort, comfort=comfort, reduced=reduced, frost=frost)
 
-    if boost and mode != ZoneMode.COMFORT:
-        raise ClimateError("boost preset requires comfort mode")
+    if boost and mode != ZoneMode.COMFORT: raise ClimateError("boost preset requires comfort mode")
 
-    return ZoneIntent(
-        mode=mode,
-        boost=boost,
-        override=override,
-        auto_comfort=auto_comfort,
-        comfort_temperature=comfort,
-        reduced_temperature=reduced,
-        frost_temperature=frost,
-    )
+    return ZoneIntent(mode=mode, boost=boost, override=override, auto_comfort=auto_comfort, comfort_temperature=comfort,
+        reduced_temperature=reduced, frost_temperature=frost)
 
 
 def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
@@ -199,12 +161,9 @@ def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
     zone.boost = intent.boost
     zone.override = intent.override if intent.mode == ZoneMode.AUTO else False
     zone.auto_comfort = intent.auto_comfort if intent.mode == ZoneMode.AUTO else None
-    if intent.comfort_temperature is not None:
-        zone.comfort_temperature = intent.comfort_temperature
-    if intent.reduced_temperature is not None:
-        zone.reduced_temperature = intent.reduced_temperature
-    if intent.frost_temperature is not None:
-        zone.frost_temperature = intent.frost_temperature
+    if intent.comfort_temperature is not None: zone.comfort_temperature = intent.comfort_temperature
+    if intent.reduced_temperature is not None: zone.reduced_temperature = intent.reduced_temperature
+    if intent.frost_temperature is not None: zone.frost_temperature = intent.frost_temperature
 
 
 def _resolve_mode_flags(
@@ -212,31 +171,22 @@ def _resolve_mode_flags(
     preset: str, # canonical preset
     zone: ZoneState, # current state, for an existing auto derogation
 ) -> tuple[ZoneMode, bool, bool, bool | None]:
-    if hvac == HVAC_OFF:
-        return ZoneMode.FROST, False, False, None
+    if hvac == HVAC_OFF: return ZoneMode.FROST, False, False, None
 
     if hvac == HVAC_AUTO:
         # "none" = follow the program (clear any derogation); comfort/eco set a
         # derogation to that level until the next program transition.
-        if preset == PRESET_NONE:
-            return ZoneMode.AUTO, False, False, zone.auto_comfort
-        if preset == PRESET_COMFORT:
-            return ZoneMode.AUTO, False, True, True
-        if preset == PRESET_ECO:
-            return ZoneMode.AUTO, False, True, False
-        if preset == PRESET_BOOST:
-            raise ClimateError("boost preset is not valid in auto mode")
+        if preset == PRESET_NONE: return ZoneMode.AUTO, False, False, zone.auto_comfort
+        if preset == PRESET_COMFORT: return ZoneMode.AUTO, False, True, True
+        if preset == PRESET_ECO: return ZoneMode.AUTO, False, True, False
+        if preset == PRESET_BOOST: raise ClimateError("boost preset is not valid in auto mode")
         return ZoneMode.AUTO, False, False, zone.auto_comfort
 
     # heat
-    if preset == PRESET_BOOST:
-        return ZoneMode.COMFORT, True, False, None
-    if preset == PRESET_COMFORT:
-        return ZoneMode.COMFORT, False, False, None
-    if preset == PRESET_ECO:
-        return ZoneMode.REDUCED, False, False, None
-    if preset == PRESET_NONE:
-        return ZoneMode.AUTO, False, False, zone.auto_comfort
+    if preset == PRESET_BOOST: return ZoneMode.COMFORT, True, False, None
+    if preset == PRESET_COMFORT: return ZoneMode.COMFORT, False, False, None
+    if preset == PRESET_ECO: return ZoneMode.REDUCED, False, False, None
+    if preset == PRESET_NONE: return ZoneMode.AUTO, False, False, zone.auto_comfort
     return ZoneMode.COMFORT, False, False, None
 
 
@@ -252,20 +202,14 @@ def _apply_target_temperature(
     frost: float | None, # current frost setpoint
 ) -> tuple[float | None, float | None, float | None]:
     temp = round(float(temperature), 1)
-    if mode == ZoneMode.FROST:
-        return comfort, reduced, temp
-    if mode == ZoneMode.REDUCED:
-        return comfort, temp, frost
-    if mode == ZoneMode.COMFORT:
-        return temp - (2.0 if boost else 0.0), reduced, frost
+    if mode == ZoneMode.FROST: return comfort, reduced, temp
+    if mode == ZoneMode.REDUCED: return comfort, temp, frost
+    if mode == ZoneMode.COMFORT: return temp - (2.0 if boost else 0.0), reduced, frost
     if mode == ZoneMode.AUTO:
         if override:
-            if auto_comfort:
-                return temp, reduced, frost
+            if auto_comfort: return temp, reduced, frost
             return comfort, temp, frost
-        if auto_comfort is True:
-            return temp, reduced, frost
-        if auto_comfort is False:
-            return comfort, temp, frost
+        if auto_comfort is True: return temp, reduced, frost
+        if auto_comfort is False: return comfort, temp, frost
         return temp, reduced, frost
     return comfort, reduced, frost

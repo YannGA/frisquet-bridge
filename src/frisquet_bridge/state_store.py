@@ -20,10 +20,8 @@ PROTOCOL_KEY = "protocol"
 
 
 def _load_payload(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+    if not path.exists(): return {}
+    try: payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         log.warning("state_load_failed", path=str(path), error=str(exc))
         return {}
@@ -37,18 +35,8 @@ def _write_payload(path: Path, payload: dict[str, object]) -> None:
 
 
 def _serialize_zone(zone: ZoneState) -> dict[str, object] | None:
-    zone_temperatures = (
-        zone.comfort_temperature,
-        zone.reduced_temperature,
-        zone.frost_temperature,
-        zone.reported_ambient,
-    )
-    central_values = (
-        zone.central_setpoint,
-        zone.central_demand,
-        zone.central_demand_on_delta,
-        zone.central_demand_off_margin,
-    )
+    zone_temperatures = (zone.comfort_temperature, zone.reduced_temperature, zone.frost_temperature, zone.reported_ambient)
+    central_values = (zone.central_setpoint, zone.central_demand, zone.central_demand_on_delta, zone.central_demand_off_margin)
     mode_values = (zone.mode, zone.mode_options, zone.auto_comfort)
     if (
         zone.schedule is None
@@ -59,66 +47,45 @@ def _serialize_zone(zone: ZoneState) -> dict[str, object] | None:
         and not zone.boost
     ):
         return None
-    schedule_hex: str | None = None
-    if zone.schedule is not None:
-        schedule_hex = b"".join(zone.schedule.days[day] for day in SCHEDULE_DAYS).hex()
-    return {
-        "mode": zone.mode.value if zone.mode is not None else None,
-        "mode_options": zone.mode_options,
-        "auto_comfort": zone.auto_comfort,
-        "override": zone.override,
-        "boost": zone.boost,
-        "comfort_temperature": zone.comfort_temperature,
-        "reduced_temperature": zone.reduced_temperature,
-        "frost_temperature": zone.frost_temperature,
-        "reported_ambient": zone.reported_ambient,
-        "schedule": schedule_hex,
-        "central_setpoint": zone.central_setpoint,
-        "central_demand": zone.central_demand,
-        "central_demand_on_delta": zone.central_demand_on_delta,
-        "central_demand_off_margin": zone.central_demand_off_margin,
-    }
+    schedule_hex = None
+    if zone.schedule is not None: schedule_hex = b"".join(zone.schedule.days[day] for day in SCHEDULE_DAYS).hex()
+    return dict(mode=zone.mode.value if zone.mode is not None else None, mode_options=zone.mode_options, auto_comfort=zone.auto_comfort,
+        override=zone.override, boost=zone.boost, comfort_temperature=zone.comfort_temperature,
+        reduced_temperature=zone.reduced_temperature, frost_temperature=zone.frost_temperature, reported_ambient=zone.reported_ambient,
+        schedule=schedule_hex, central_setpoint=zone.central_setpoint, central_demand=zone.central_demand,
+        central_demand_on_delta=zone.central_demand_on_delta, central_demand_off_margin=zone.central_demand_off_margin)
 
 
 def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
     mode = raw.get("mode")
-    if isinstance(mode, str):
-        zone.mode = ZoneMode.parse(mode)
+    if isinstance(mode, str): zone.mode = ZoneMode.parse(mode)
     mode_options = raw.get("mode_options")
-    if isinstance(mode_options, int) and not isinstance(mode_options, bool):
-        zone.mode_options = mode_options
+    if isinstance(mode_options, int) and not isinstance(mode_options, bool): zone.mode_options = mode_options
     if "auto_comfort" in raw:
         auto_comfort = raw["auto_comfort"]
-        if auto_comfort is None or isinstance(auto_comfort, bool):
-            zone.auto_comfort = auto_comfort
+        if auto_comfort is None or isinstance(auto_comfort, bool): zone.auto_comfort = auto_comfort
     for attr in ("override", "boost"):
         value = raw.get(attr)
-        if isinstance(value, bool):
-            setattr(zone, attr, value)
+        if isinstance(value, bool): setattr(zone, attr, value)
     for attr in ("comfort_temperature", "reduced_temperature", "frost_temperature"):
         value = raw.get(attr)
-        if isinstance(value, int | float) and not isinstance(value, bool):
-            setattr(zone, attr, float(value))
+        if isinstance(value, int | float) and not isinstance(value, bool): setattr(zone, attr, float(value))
     reported_ambient = raw.get("reported_ambient")
-    if isinstance(reported_ambient, int | float) and not isinstance(reported_ambient, bool):
-        zone.reported_ambient = float(reported_ambient)
+    if isinstance(reported_ambient, int | float) and not isinstance(reported_ambient, bool): zone.reported_ambient = float(reported_ambient)
     central_demand = raw.get("central_demand")
-    if isinstance(central_demand, bool):
-        zone.central_demand = central_demand
+    if isinstance(central_demand, bool): zone.central_demand = central_demand
     for attr in ("central_setpoint", "central_demand_on_delta", "central_demand_off_margin"):
         value = raw.get(attr)
-        if isinstance(value, int | float) and not isinstance(value, bool):
-            setattr(zone, attr, float(value))
+        if isinstance(value, int | float) and not isinstance(value, bool): setattr(zone, attr, float(value))
     schedule = raw.get("schedule")
-    if isinstance(schedule, str):
-        zone.schedule = ZoneSchedule.decode(bytes.fromhex(schedule))
+    if isinstance(schedule, str): zone.schedule = ZoneSchedule.decode(bytes.fromhex(schedule))
 
 
 def save_zone_state(
     path: Path, # sidecar file to write
     data: BoilerData, # zones to persist
 ) -> None:
-    """Atomically persist any learned zone metadata to ``path``."""
+    'Atomically persist any learned zone metadata to ``path``.'
     try:
         payload = _load_payload(path)
         for n, zs in data.zones.items():
@@ -126,15 +93,14 @@ def save_zone_state(
             if zone is None: payload.pop(str(n), None)
             else: payload[str(n)] = zone
         _write_payload(path, payload)
-    except OSError as exc:
-        log.warning("zone_state_save_failed", path=str(path), error=str(exc))
+    except OSError as exc: log.warning("zone_state_save_failed", path=str(path), error=str(exc))
 
 
 def load_zone_state(
     path: Path, # sidecar file to read
     data: BoilerData, # zones to populate in place
 ) -> None:
-    """Populate ``data`` with previously-learned zone metadata, if present."""
+    'Populate ``data`` with previously-learned zone metadata, if present.'
     payload = _load_payload(path)
     loaded = []
     for n, zone in data.zones.items():
@@ -143,24 +109,19 @@ def load_zone_state(
             try:
                 _apply_zone(zone, raw)
                 loaded.append(n)
-            except (ValueError, KeyError) as exc:
-                log.warning("zone_state_apply_failed", zone=n, error=str(exc))
-    if loaded:
-        log.info("zone_state_loaded", zones=loaded, path=str(path))
+            except (ValueError, KeyError) as exc: log.warning("zone_state_apply_failed", zone=n, error=str(exc))
+    if loaded: log.info("zone_state_loaded", zones=loaded, path=str(path))
 
 
 def load_protocol_request_ids(path: Path) -> dict[str, int]:
     payload = _load_payload(path)
     raw = payload.get(PROTOCOL_KEY)
-    if not isinstance(raw, dict):
-        return {}
-    request_ids: dict[str, int] = {}
+    if not isinstance(raw, dict): return {}
+    request_ids = {}
     for role, state in raw.items():
-        if not isinstance(role, str) or not isinstance(state, dict):
-            continue
+        if not isinstance(role, str) or not isinstance(state, dict): continue
         request_id = state.get("request_id")
-        if isinstance(request_id, int) and not isinstance(request_id, bool) and 0 <= request_id <= 0xFF:
-            request_ids[role] = request_id
+        if isinstance(request_id, int) and not isinstance(request_id, bool) and 0 <= request_id <= 0xFF: request_ids[role] = request_id
     return request_ids
 
 
@@ -177,5 +138,4 @@ def save_protocol_request_id(
             payload[PROTOCOL_KEY] = protocol
         protocol[role] = {"request_id": request_id & 0xFF}
         _write_payload(path, payload)
-    except OSError as exc:
-        log.warning("protocol_state_save_failed", path=str(path), role=role, error=str(exc))
+    except OSError as exc: log.warning("protocol_state_save_failed", path=str(path), role=role, error=str(exc))

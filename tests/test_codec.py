@@ -1,4 +1,4 @@
-"""Tests for Frisquet field encode/decode helpers."""
+'Tests for Frisquet field encode/decode helpers.'
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from frisquet_bridge.connect.codec import (
     decode_temp16,
     encode_pressure16,
     encode_temp8,
-    encode_temp16,
-)
+    encode_temp16,)
 
 
 def test_temperature_and_pressure_codecs_round_trip():

@@ -17,7 +17,7 @@ OUTSIDE_TEMP_ABSENT = 129.0
 
 
 class DhwMode(StrEnum):
-    """Domestic hot water (DHW) mode. Values are the raw protocol bytes."""
+    'Domestic hot water (DHW) mode. Values are the raw protocol bytes.'
 
     MAX = "Max"
     ECO = "Eco"
@@ -27,12 +27,10 @@ class DhwMode(StrEnum):
     STOP = "Stop"
 
     @property
-    def byte(self) -> int:
-        return _DHW_MODE_TO_BYTE[self]
+    def byte(self) -> int: return _DHW_MODE_TO_BYTE[self]
 
     @classmethod
-    def from_byte(cls, raw: int) -> DhwMode | None:
-        return _DHW_BYTE_TO_MODE.get(raw & 0x7E)
+    def from_byte(cls, raw: int) -> DhwMode | None: return _DHW_BYTE_TO_MODE.get(raw & 0x7E)
 
     @classmethod
     def parse(cls, value: str) -> DhwMode:
@@ -44,30 +42,18 @@ class DhwMode(StrEnum):
         return mode
 
 
-_DHW_MODE_TO_BYTE: dict[DhwMode, int] = {
-    DhwMode.MAX: 0x00,
-    DhwMode.ECO: 0x08,
-    DhwMode.ECO_SCHEDULE: 0x10,
-    DhwMode.ECO_PLUS: 0x18,
-    DhwMode.ECO_PLUS_SCHEDULE: 0x20,
-    DhwMode.STOP: 0x28,
-}
-_DHW_BYTE_TO_MODE: dict[int, DhwMode] = {v: k for k, v in _DHW_MODE_TO_BYTE.items()}
+_DHW_MODE_TO_BYTE = {DhwMode.MAX: 0, DhwMode.ECO: 8, DhwMode.ECO_SCHEDULE: 16, DhwMode.ECO_PLUS: 24, DhwMode.ECO_PLUS_SCHEDULE: 32, DhwMode.STOP: 40}
+_DHW_BYTE_TO_MODE = {v: k for k, v in _DHW_MODE_TO_BYTE.items()}
 
 # Modes exposed in the Home Assistant DHW selector. The Eco+ variants only
 # exist on some boiler models (e.g. those with a dedicated DHW tank), so the
 # selector advertises only the four modes the standard app shows. The full
 # enum above is still used to *decode* whatever the boiler reports.
-DHW_SELECTABLE_MODES: tuple[DhwMode, ...] = (
-    DhwMode.MAX,
-    DhwMode.ECO,
-    DhwMode.ECO_SCHEDULE,
-    DhwMode.STOP,
-)
+DHW_SELECTABLE_MODES = (DhwMode.MAX, DhwMode.ECO, DhwMode.ECO_SCHEDULE, DhwMode.STOP)
 
 
 class ZoneSource(StrEnum):
-    """Configured owner of a zone's room state."""
+    "Configured owner of a zone's room state."
 
     CONNECT = "connect"
     SATELLITE = "satellite"
@@ -75,7 +61,7 @@ class ZoneSource(StrEnum):
 
 
 class ZoneMode(StrEnum):
-    """Heating mode for a zone."""
+    'Heating mode for a zone.'
 
     AUTO = "Auto"
     COMFORT = "Comfort"
@@ -83,12 +69,10 @@ class ZoneMode(StrEnum):
     FROST = "Frost protection"
 
     @property
-    def byte(self) -> int:
-        return _ZONE_MODE_TO_BYTE[self]
+    def byte(self) -> int: return _ZONE_MODE_TO_BYTE[self]
 
     @classmethod
-    def from_byte(cls, raw: int) -> ZoneMode | None:
-        return _ZONE_BYTE_TO_MODE.get(raw)
+    def from_byte(cls, raw: int) -> ZoneMode | None: return _ZONE_BYTE_TO_MODE.get(raw)
 
     @classmethod
     def parse(cls, value: str) -> ZoneMode:
@@ -100,41 +84,18 @@ class ZoneMode(StrEnum):
         return mode
 
 
-_ZONE_MODE_TO_BYTE: dict[ZoneMode, int] = {
-    ZoneMode.AUTO: 0x05,
-    ZoneMode.COMFORT: 0x06,
-    ZoneMode.REDUCED: 0x07,
-    ZoneMode.FROST: 0x08,
-}
-_ZONE_BYTE_TO_MODE: dict[int, ZoneMode] = {v: k for k, v in _ZONE_MODE_TO_BYTE.items()}
+_ZONE_MODE_TO_BYTE = {ZoneMode.AUTO: 5, ZoneMode.COMFORT: 6, ZoneMode.REDUCED: 7, ZoneMode.FROST: 8}
+_ZONE_BYTE_TO_MODE = {v: k for k, v in _ZONE_MODE_TO_BYTE.items()}
 
 
-def _normalize_label(value: str) -> str:
-    return value.strip().casefold().replace("é", "e").replace("_", " ").replace("-", " ")
+def _normalize_label(value: str) -> str: return value.strip().casefold().replace("é", "e").replace("_", " ").replace("-", " ")
 
 
-_DHW_LABELS: dict[str, DhwMode] = {
-    _normalize_label(mode.value): mode for mode in DhwMode
-}
-_DHW_LABELS.update(
-    {
-        "eco horaires": DhwMode.ECO_SCHEDULE,
-        "eco schedule": DhwMode.ECO_SCHEDULE,
-        "eco+ horaires": DhwMode.ECO_PLUS_SCHEDULE,
-        "eco+ schedule": DhwMode.ECO_PLUS_SCHEDULE,
-    }
-)
-_ZONE_LABELS: dict[str, ZoneMode] = {
-    _normalize_label(mode.value): mode for mode in ZoneMode
-}
-_ZONE_LABELS.update(
-    {
-        "reduit": ZoneMode.REDUCED,
-        "eco": ZoneMode.REDUCED,
-        "hors gel": ZoneMode.FROST,
-        "frost": ZoneMode.FROST,
-    }
-)
+_DHW_LABELS = {_normalize_label(mode.value): mode for mode in DhwMode}
+_DHW_LABELS.update({'eco horaires': DhwMode.ECO_SCHEDULE, 'eco schedule': DhwMode.ECO_SCHEDULE, 'eco+ horaires': DhwMode.ECO_PLUS_SCHEDULE,
+    'eco+ schedule': DhwMode.ECO_PLUS_SCHEDULE})
+_ZONE_LABELS = {_normalize_label(mode.value): mode for mode in ZoneMode}
+_ZONE_LABELS.update({'reduit': ZoneMode.REDUCED, 'eco': ZoneMode.REDUCED, 'hors gel': ZoneMode.FROST, 'frost': ZoneMode.FROST})
 
 
 class BoilerStatus(StrEnum):
@@ -144,10 +105,8 @@ class BoilerStatus(StrEnum):
 
     @classmethod
     def from_byte(cls, status_byte: int) -> BoilerStatus:
-        if status_byte & 0b0000_0100:
-            return cls.HEATING_OFF
-        if status_byte & 0b0000_1000:
-            return cls.RUNNING
+        if status_byte & 0b0000_0100: return cls.HEATING_OFF
+        if status_byte & 0b0000_1000: return cls.RUNNING
         return cls.STANDBY
 
 
@@ -160,17 +119,10 @@ class ZoneSchedule:
 
     @classmethod
     def decode(cls, payload: bytes) -> ZoneSchedule:
-        if len(payload) < 42:
-            raise ValueError(f"zone schedule payload too short: {len(payload)} bytes")
-        return cls(
-            days={
-                day: payload[offset : offset + 6]
-                for offset, day in zip(range(0, 42, 6), SCHEDULE_DAYS, strict=True)
-            }
-        )
+        if len(payload) < 42: raise ValueError(f"zone schedule payload too short: {len(payload)} bytes")
+        return cls(days={day: payload[offset:offset + 6] for offset, day in zip(range(0, 42, 6), SCHEDULE_DAYS, strict=True)})
 
-    def compact_hex(self) -> str:
-        return " ".join(f"{day[:3]}={self.days[day].hex()}" for day in SCHEDULE_DAYS)
+    def compact_hex(self) -> str: return " ".join(f"{day[:3]}={self.days[day].hex()}" for day in SCHEDULE_DAYS)
 
 
 @dataclass
@@ -228,7 +180,7 @@ class SondeState:
 
 @dataclass
 class RfHealth:
-    """Runtime RF outcome counters and freshness for one logical operation."""
+    'Runtime RF outcome counters and freshness for one logical operation.'
 
     freshness_seconds: float
     zone: int | None = None
@@ -267,17 +219,13 @@ class RfHealth:
         self.last_success = datetime.now(UTC).isoformat()
         if rssi is not None: self.last_rssi = rssi
 
-    def record_nack(self) -> None:
-        self._record_failure("nacks")
+    def record_nack(self) -> None: self._record_failure("nacks")
 
-    def record_timeout(self) -> None:
-        self._record_failure("timeouts")
+    def record_timeout(self) -> None: self._record_failure("timeouts")
 
-    def record_transport_failure(self) -> None:
-        self._record_failure("transport_failures")
+    def record_transport_failure(self) -> None: self._record_failure("transport_failures")
 
-    def record_other_failure(self) -> None:
-        self._record_failure("other_failures")
+    def record_other_failure(self) -> None: self._record_failure("other_failures")
 
     def _record_failure(self, counter: str) -> None:
         self.attempts += 1
@@ -287,7 +235,7 @@ class RfHealth:
 
 @dataclass
 class BoilerData:
-    """Aggregate state for the whole installation."""
+    'Aggregate state for the whole installation.'
 
     boiler: BoilerState = field(default_factory=BoilerState)
     zones: dict[int, ZoneState] = field(default_factory=lambda: {n: ZoneState(zone=n) for n in (1, 2, 3)})

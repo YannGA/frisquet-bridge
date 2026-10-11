@@ -1,4 +1,4 @@
-"""Tests for service-level polling decisions."""
+'Tests for service-level polling decisions.'
 
 import asyncio
 from pathlib import Path
@@ -7,30 +7,20 @@ import pytest
 
 from frisquet_bridge.config import BridgeConfig, ConnectConfig, DeviceIdentity, ZoneConfig
 from frisquet_bridge.model import BoilerData, ZoneSource
-from frisquet_bridge.service import (
-    BridgeService,
-    _configure_rf_diagnostics,
-    _configure_zone_sources,
-    _has_read_only_satellite_zone,
-)
+from frisquet_bridge.service import BridgeService, _configure_rf_diagnostics, _configure_zone_sources, _has_read_only_satellite_zone
 from frisquet_bridge.transport.base import TransportError
 
 
 def _config(tmp_path: Path, *modes: str) -> BridgeConfig:
     cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    for zone_number, mode in enumerate(modes, 1):
-        setattr(cfg, f"zone{zone_number}", ZoneConfig(mode=mode))
+    for zone_number, mode in enumerate(modes, 1): setattr(cfg, f"zone{zone_number}", ZoneConfig(mode=mode))
     return cfg
 
 
 def test_has_read_only_satellite_zone_only_for_physical_satellite(tmp_path: Path):
-    cases = [
-        (("virtual_satellite", "simple_satellite", "disabled"), (1, 2), False),
-        (("central_boiler", "disabled", "disabled"), (1,), False),
-        (("virtual_satellite", "satellite", "disabled"), (1, 2), True),
-    ]
-    for modes, zones, expected in cases:
-        assert _has_read_only_satellite_zone(_config(tmp_path, *modes), zones) == expected
+    cases = [(('virtual_satellite', 'simple_satellite', 'disabled'), (1, 2), False),
+        (('central_boiler', 'disabled', 'disabled'), (1,), False), (('virtual_satellite', 'satellite', 'disabled'), (1, 2), True)]
+    for modes, zones, expected in cases: assert _has_read_only_satellite_zone(_config(tmp_path, *modes), zones) == expected
 
 
 def test_configure_zone_sources_maps_zone_modes_to_owners(tmp_path: Path):
@@ -69,14 +59,11 @@ async def test_shutdown_propagates_transport_failure_but_swallows_offline_publis
     service = BridgeService.__new__(BridgeService)
     service._stop = asyncio.Event()
 
-    async def fail_transport():
-        raise TransportError("serial reader failed: disconnected")
+    async def fail_transport(): raise TransportError("serial reader failed: disconnected")
 
-    with pytest.raises(TransportError, match="disconnected"):
-        await service._wait_for_stop_or_transport_failure(fail_transport())
+    with pytest.raises(TransportError, match="disconnected"): await service._wait_for_stop_or_transport_failure(fail_transport())
 
     class FailingAdapter:
-        async def publish_offline(self, _client):
-            raise RuntimeError("broker disconnected")
+        async def publish_offline(self, _client): raise RuntimeError("broker disconnected")
 
     await service._publish_offline_preserving_failure(FailingAdapter(), object(), TransportError("transport died"))

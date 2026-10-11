@@ -1,9 +1,8 @@
-"""Async polling scheduler for boiler reads."""
+'Async polling scheduler for boiler reads.'
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import asyncio, contextlib
 from collections.abc import Awaitable, Callable
 
 import structlog
@@ -62,7 +61,7 @@ class PollScheduler:
         self._outside_temperature_retry_interval = outside_temperature_retry_interval
         self._outside_temperature_min_change_interval = outside_temperature_min_change_interval
         self._outside_temperature_due = 0.0
-        self._outside_temperature_last_sent: float | None = None
+        self._outside_temperature_last_sent = None
         self._outside_temperature_lock = asyncio.Lock()
         self._enabled_zones = enabled_zones
         self._on_update = on_update
@@ -95,8 +94,7 @@ class PollScheduler:
             loop = asyncio.get_running_loop()
             now = loop.time()
             if only_if_due and now < self._outside_temperature_due: return False
-            if temperature is not _UNCHANGED:
-                self._data.sonde.outside_temperature = float(temperature)
+            if temperature is not _UNCHANGED: self._data.sonde.outside_temperature = float(temperature)
             if is_change and self._outside_temperature_last_sent is not None:
                 earliest = self._outside_temperature_last_sent + self._outside_temperature_min_change_interval
                 if now < earliest:
@@ -105,10 +103,7 @@ class PollScheduler:
                     return False
             desired = self._data.sonde.outside_temperature
             if desired is None: return False
-            succeeded = await self._safe_poll(
-                "outside_temperature",
-                lambda: self._sonde_ops.write_outside_temperature(self._data, desired),
-            )
+            succeeded = await self._safe_poll('outside_temperature', lambda: self._sonde_ops.write_outside_temperature(self._data, desired))
             self._outside_temperature_last_sent = loop.time()
             interval = self._outside_temperature_interval if succeeded else self._outside_temperature_retry_interval
             self._outside_temperature_due = loop.time() + interval
@@ -131,14 +126,8 @@ class PollScheduler:
                 self._log_state()
             if self._poll_connect and self._ops is not None and now >= satellite_info_due:
                 ops = self._ops
-                await self._safe_poll(
-                    "satellite_info",
-                    lambda ops=ops: ops.read_satellite_info(
-                        self._data,
-                        timeout=self._satellite_info_timeout,
-                        retries=1,
-                    ),
-                )
+                await self._safe_poll('satellite_info',
+                    lambda ops=ops: ops.read_satellite_info(self._data, timeout=self._satellite_info_timeout, retries=1))
                 satellite_info_due = float("inf")
                 if self._poll_satellite_info: satellite_info_due = now + self._satellite_info_interval
             if self._poll_connect and self._ops is not None and now >= slow_due:
@@ -155,38 +144,31 @@ class PollScheduler:
             ):
                 await self._attempt_outside_temperature(only_if_due=True)
             next_due = []
-            if self._poll_connect and self._ops is not None:
-                next_due.extend((sensor_due, satellite_info_due, slow_due))
+            if self._poll_connect and self._ops is not None: next_due.extend((sensor_due, satellite_info_due, slow_due))
             if self._push_outside_temperature and self._sonde_ops is not None and self._data.sonde.outside_temperature is not None:
                 next_due.append(self._outside_temperature_due)
             sleep_for = 5.0
-            if next_due:
-                sleep_for = min(sleep_for, max(0.0, min(next_due) - loop.time()))
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._wake.wait(), timeout=sleep_for)
+            if next_due: sleep_for = min(sleep_for, max(0.0, min(next_due) - loop.time()))
+            with contextlib.suppress(TimeoutError): await asyncio.wait_for(self._wake.wait(), timeout=sleep_for)
 
     async def _safe_poll(
         self,
         name: str, # poll name used in logs
-        fn: Callable[[], Awaitable[None]], # coroutine factory performing the poll
+        fn: Callable[[], Awaitable], # coroutine factory performing the poll
     ) -> bool:
         succeeded = False
-        try:
-            await fn()
-        except Exception:
-            log.exception("poll_failed", poll=name)
+        try: await fn()
+        except Exception: log.exception("poll_failed", poll=name)
         else:
             succeeded = True
             log.debug("poll_succeeded", poll=name)
         if self._on_update is not None:
-            try:
-                await self._on_update()
-            except Exception:
-                log.exception("poll_update_failed", poll=name)
+            try: await self._on_update()
+            except Exception: log.exception("poll_update_failed", poll=name)
         return succeeded
 
     def _log_state(self) -> None:
-        """Log the current internal state (zone temps, modes, boiler) for debugging."""
+        'Log the current internal state (zone temps, modes, boiler) for debugging.'
         d = self._data
         for z in self._enabled_zones:
             zs = d.zones[z]
@@ -203,12 +185,10 @@ class PollScheduler:
                 reduced_temperature=zs.reduced_temperature,
                 frost_temperature=zs.frost_temperature,
                 override=zs.override,
-                boost=zs.boost,
-            )
+                boost=zs.boost)
         log.info(
             "boiler_state",
             outside_temperature=d.sonde.outside_temperature,
             boiler_status=d.boiler.status.value if d.boiler.status is not None else None,
             boiler_fault=d.boiler.fault,
-            dhw_temperature=d.boiler.dhw_temperature,
-        )
+            dhw_temperature=d.boiler.dhw_temperature)

@@ -1,4 +1,4 @@
-"""Tests for protocol state (request id management)."""
+'Tests for protocol state (request id management).'
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def test_next_request_id_increments_wraps_and_notifies():
     state.request_id = 0xFE
     assert state.next_request_id() == 0x02
 
-    seen: list[int] = []
+    seen = []
     state.on_change = lambda st: seen.append(st.request_id)
     state.request_id = 0x10
     assert state.next_request_id() == 0x14

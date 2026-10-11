@@ -1,4 +1,4 @@
-"""Recover the boiler's network id by sniffing an association broadcast."""
+"Recover the boiler's network id by sniffing an association broadcast."
 
 from __future__ import annotations
 
@@ -13,10 +13,7 @@ from frisquet_bridge.transport.serial import SerialTransport
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "recover-id",
-        help="Recover the boiler network id (sniff association, no reply)",
-    )
+    p = sub.add_parser('recover-id', help='Recover the boiler network id (sniff association, no reply)')
     p.add_argument("--config", default="config.toml", help="Config file path")
     p.add_argument("--timeout", type=float, default=30.0, help="Seconds to wait for a broadcast")
     p.add_argument("--save", action="store_true", help="Persist the recovered network id to the config")
@@ -25,10 +22,8 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    try:
-        asyncio.run(_recover(args.config, args.timeout, args.save, args.raw_recorder))
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    try: asyncio.run(_recover(args.config, args.timeout, args.save, args.raw_recorder))
+    except KeyboardInterrupt: print("\nStopped.")
     return 0
 
 
@@ -50,5 +45,4 @@ async def _recover(
         cfg.network_id = network_id
         cfg.save()
         print(f"Saved to {config_path}. You can now cancel the association on the boiler.")
-    else:
-        print("Re-run with --save to persist it. You can now cancel the association on the boiler.")
+    else: print("Re-run with --save to persist it. You can now cancel the association on the boiler.")

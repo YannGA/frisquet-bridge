@@ -32,7 +32,7 @@ _CONSIGNE_BY_PROFILE = {"central_boiler": central_boiler_consigne, "simple_satel
 
 
 class VirtualSatellite:
-    """Periodically reports a zone's ambient/setpoint/mode to the boiler."""
+    "Periodically reports a zone's ambient/setpoint/mode to the boiler."
 
     def __init__(
         self,
@@ -56,7 +56,7 @@ class VirtualSatellite:
         self._stop = asyncio.Event()
 
     def request_send(self) -> None:
-        """Ask the runner to send a consigne now (e.g. after an HA command)."""
+        'Ask the runner to send a consigne now (e.g. after an HA command).'
         self._wake.set()
 
     def stop(self) -> None:
@@ -67,11 +67,10 @@ class VirtualSatellite:
         while not self._stop.is_set():
             await self._send_once()
             self._wake.clear()
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
+            with contextlib.suppress(TimeoutError): await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
 
     async def send_now(self) -> bool:
-        """Send a single consigne immediately; returns True if it was sent."""
+        'Send a single consigne immediately; returns True if it was sent.'
         return await self._send_once()
 
     async def _send_once(self) -> bool:
@@ -85,27 +84,15 @@ class VirtualSatellite:
             ambient = consigne.ambient if consigne is not None else None
             setpoint = consigne.setpoint if consigne is not None else None
         if ambient is None or zs.mode is None or setpoint is None:
-            log.debug(
-                "virtual_satellite_skip",
-                zone=self._zone,
-                profile=self._profile,
-                ambient=ambient,
-                setpoint=setpoint,
-                mode=zs.mode.value if zs.mode is not None else None,
-            )
+            log.debug('virtual_satellite_skip', zone=self._zone, profile=self._profile, ambient=ambient, setpoint=setpoint,
+                mode=zs.mode.value if zs.mode is not None else None)
             return False
         try:
-            await self._ops.send_zone_consigne(
-                self._zone,
-                self._data,
-                ambient=ambient,
-                setpoint=setpoint,
-                connect_compat=self._connect_compat,
-            )
+            await self._ops.send_zone_consigne(self._zone, self._data, ambient=ambient, setpoint=setpoint,
+                connect_compat=self._connect_compat)
             sent = True
         except Exception:
             log.exception("virtual_satellite_send_failed", zone=self._zone)
             sent = False
-        if self._on_update is not None:
-            await self._on_update()
+        if self._on_update is not None: await self._on_update()
         return sent

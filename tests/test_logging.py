@@ -1,4 +1,4 @@
-"""Tests for production logging helpers."""
+'Tests for production logging helpers.'
 
 import json
 
@@ -9,21 +9,13 @@ from frisquet_bridge.logging import RawMessageRecorder
 def test_raw_message_recorder_writes_frame_metadata_and_opt_in_lines(tmp_path):
     path = tmp_path / "raw.jsonl"
     recorder = RawMessageRecorder(str(path), max_bytes=10_000, backup_count=1)
-    frame = Frame(
-        to_addr=ADDR_BOILER,
-        from_addr=ADDR_CONNECT,
-        association_id=0xEA,
-        request_id=0x28,
-        control=0x01,
-        msg_type=MSG_READ,
-        payload=bytes.fromhex("79e0001c"),
-    )
+    frame = Frame(to_addr=ADDR_BOILER, from_addr=ADDR_CONNECT, association_id=234, request_id=40, control=1, msg_type=MSG_READ,
+        payload=bytes.fromhex('79e0001c'))
 
     try:
         recorder.record_frame("tx", frame, frame.encode(), outcome="attempt")
         recorder.record_line("rx", "HB")
-    finally:
-        recorder.close()
+    finally: recorder.close()
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1

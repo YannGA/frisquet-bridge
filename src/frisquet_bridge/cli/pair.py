@@ -1,4 +1,4 @@
-"""Pair with the boiler and persist network/association ids."""
+'Pair with the boiler and persist network/association ids.'
 
 from __future__ import annotations
 
@@ -12,13 +12,7 @@ from frisquet_bridge.frame import ADDR_CONNECT, ADDR_SATELLITE_Z1, ADDR_SATELLIT
 from frisquet_bridge.logging import RawMessageRecorder
 from frisquet_bridge.transport.serial import SerialTransport
 
-PAIR_ROLES = {
-    "connect": ADDR_CONNECT,
-    "sonde": ADDR_SONDE,
-    "satellite_z1": ADDR_SATELLITE_Z1,
-    "satellite_z2": ADDR_SATELLITE_Z2,
-    "satellite_z3": ADDR_SATELLITE_Z3,
-}
+PAIR_ROLES = dict(connect=ADDR_CONNECT, sonde=ADDR_SONDE, satellite_z1=ADDR_SATELLITE_Z1, satellite_z2=ADDR_SATELLITE_Z2, satellite_z3=ADDR_SATELLITE_Z3)
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -30,10 +24,8 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    try:
-        asyncio.run(_pair(args.config, args.role, args.raw_recorder))
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    try: asyncio.run(_pair(args.config, args.role, args.raw_recorder))
+    except KeyboardInterrupt: print("\nStopped.")
     return 0
 
 

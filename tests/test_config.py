@@ -1,4 +1,4 @@
-"""Tests for TOML config loading."""
+'Tests for TOML config loading.'
 
 from __future__ import annotations
 
@@ -55,8 +55,7 @@ raw_max_bytes = 54321
 raw_backup_count = 3
 raw_lines = true
 """,
-        encoding="utf-8",
-    )
+        encoding="utf-8")
 
     cfg = load(path)
 
@@ -100,11 +99,7 @@ def test_load_minimal_config_defaults(tmp_path: Path):
 
 
 def test_connect_modes_gate_reads_and_writes(tmp_path: Path):
-    cases = [
-        ("read", 'association_id = "ea"', True, False),
-        ("full", 'association_id = "ea"', True, True),
-        ("passive", "", False, False),
-    ]
+    cases = [('read', 'association_id = "ea"', True, False), ('full', 'association_id = "ea"', True, True), ('passive', '', False, False)]
     for mode, identity, reads, writes in cases:
         path = tmp_path / f"{mode}.toml"
         path.write_text(
@@ -115,8 +110,7 @@ boiler_addr = "80"
 [frisquet.connect]
 mode = "{mode}"
 {identity}""",
-            encoding="utf-8",
-        )
+            encoding="utf-8")
 
         cfg = load(path)
 
@@ -153,13 +147,11 @@ def test_load_rejects_invalid_config(tmp_path: Path):
             "requires zone2 to be disabled",
         ),
         ("\n[home_assistant]\nenabled = true\n", "unknown field 'home_assistant'"),
-        ('\n[logging]\nformat = "pretty"\n', "logging.format"),
-    ]
+        ('\n[logging]\nformat = "pretty"\n', "logging.format")]
     for i, (extra, match) in enumerate(cases):
         path = tmp_path / f"invalid{i}.toml"
         path.write_text(BASE + extra, encoding="utf-8")
-        with pytest.raises(ConfigError, match=match):
-            load(path)
+        with pytest.raises(ConfigError, match=match): load(path)
 
 
 def test_load_applies_protocol_request_ids_from_sidecar(tmp_path: Path):
@@ -171,8 +163,7 @@ def test_load_applies_protocol_request_ids_from_sidecar(tmp_path: Path):
 mode = "simple_satellite"
 association_id = "c0"
 """,
-        encoding="utf-8",
-    )
+        encoding="utf-8")
     path.with_name("config.state.json").write_text(
         r"""
 {
@@ -181,8 +172,7 @@ association_id = "c0"
   }
 }
 """,
-        encoding="utf-8",
-    )
+        encoding="utf-8")
 
     cfg = load(path)
 

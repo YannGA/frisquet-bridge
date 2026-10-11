@@ -1,4 +1,4 @@
-"""Long-running bridge service."""
+'Long-running bridge service.'
 
 from __future__ import annotations
 
@@ -19,10 +19,8 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 def run(args: argparse.Namespace) -> int:
     cfg = load(args.config)
-    try:
-        asyncio.run(_serve(cfg, args.raw_recorder))
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    try: asyncio.run(_serve(cfg, args.raw_recorder))
+    except KeyboardInterrupt: print("\nStopped.")
     return 0
 
 
@@ -32,6 +30,5 @@ async def _serve(
 ) -> None:
     service = BridgeService(cfg, raw_recorder=raw_recorder)
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, service.stop)
+    for sig in (signal.SIGINT, signal.SIGTERM): loop.add_signal_handler(sig, service.stop)
     await service.run()

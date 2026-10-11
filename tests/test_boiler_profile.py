@@ -1,4 +1,4 @@
-"""Tests for simplified and central-boiler profile logic."""
+'Tests for simplified and central-boiler profile logic.'
 
 import pytest
 
@@ -9,8 +9,7 @@ from frisquet_bridge.boiler_profile import (
     apply_simple_command,
     central_boiler_consigne,
     simple_consigne,
-    simple_target_temperature,
-)
+    simple_target_temperature,)
 from frisquet_bridge.climate import HVAC_AUTO, HVAC_HEAT, PRESET_ECO
 from frisquet_bridge.model import ZoneMode, ZoneState
 
@@ -35,8 +34,7 @@ def test_simple_profile_walks_thermostat_session():
     assert (zone.frost_temperature, zone.reduced_temperature, zone.comfort_temperature) == (
         SIMPLE_DEFAULT_FROST_TEMPERATURE,
         SIMPLE_DEFAULT_REDUCED_TEMPERATURE,
-        21.0,
-    )
+        21.0,)
 
     zone = ZoneState(zone=1, mode=ZoneMode.COMFORT, reduced_temperature=17.0)
     apply_simple_command(zone, preset=PRESET_ECO)

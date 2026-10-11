@@ -1,4 +1,4 @@
-"""Tests for zone climate mapping (pure logic, no I/O)."""
+'Tests for zone climate mapping (pure logic, no I/O).'
 
 import pytest
 
@@ -15,15 +15,13 @@ from frisquet_bridge.climate import (
     zone_hvac_action,
     zone_hvac_mode,
     zone_preset,
-    zone_target_temperature,
-)
+    zone_target_temperature,)
 from frisquet_bridge.model import BoilerState, ZoneMode, ZoneState
 
 
 def _zone(**kwargs):
     base = ZoneState(zone=1)
-    for key, value in kwargs.items():
-        setattr(base, key, value)
+    for key, value in kwargs.items(): setattr(base, key, value)
     return base
 
 
@@ -77,13 +75,10 @@ def test_resolve_zone_intent_applies_commands():
     frosted = resolve_zone_intent(_zone(mode=ZoneMode.AUTO), hvac_mode=HVAC_OFF)
     assert (frosted.mode, frosted.boost) == (ZoneMode.FROST, False)
 
-    targeted = resolve_zone_intent(
-        _zone(mode=ZoneMode.COMFORT, comfort_temperature=20.0, reduced_temperature=17.0, frost_temperature=7.0),
-        target_temperature=21.5,
-    )
+    targeted = resolve_zone_intent(_zone(mode=ZoneMode.COMFORT, comfort_temperature=20.0, reduced_temperature=17.0, frost_temperature=7.0),
+        target_temperature=21.5)
     assert targeted.comfort_temperature == 21.5
 
 
 def test_resolve_boost_outside_comfort_raises():
-    with pytest.raises(ClimateError, match="auto"):
-        resolve_zone_intent(_zone(mode=ZoneMode.AUTO), preset=PRESET_BOOST)
+    with pytest.raises(ClimateError, match="auto"): resolve_zone_intent(_zone(mode=ZoneMode.AUTO), preset=PRESET_BOOST)

@@ -1,4 +1,4 @@
-"""Tests for internal data model enums and defaults."""
+'Tests for internal data model enums and defaults.'
 
 from frisquet_bridge.model import BoilerData, BoilerStatus, DhwMode, RfHealth, ZoneMode
 

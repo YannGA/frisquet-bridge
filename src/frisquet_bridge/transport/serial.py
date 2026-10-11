@@ -10,20 +10,11 @@ from __future__ import annotations
 import asyncio, contextlib, secrets, threading
 from collections.abc import AsyncIterator
 
-import serial
-import structlog
+import serial, structlog
 
 from frisquet_bridge.frame import Frame, FrameError
 from frisquet_bridge.logging import RawMessageRecorder
-from frisquet_bridge.protocol import (
-    ERR_RE,
-    OK_RE,
-    PONG_RE,
-    READY_RE,
-    format_cmd,
-    parse_rx,
-    verify_crc,
-)
+from frisquet_bridge.protocol import ERR_RE, OK_RE, PONG_RE, READY_RE, format_cmd, parse_rx, verify_crc
 from frisquet_bridge.transport.base import ReceivedFrame, Transport, TransportError
 
 log = structlog.get_logger(__name__)
@@ -45,17 +36,17 @@ class SerialTransport(Transport):
         self._command_timeout = command_timeout
         self._raw_recorder = raw_recorder
 
-        self._serial: serial.Serial | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._reader: threading.Thread | None = None
+        self._serial = None
+        self._loop = None
+        self._reader = None
         self._closing = False
         self._failure = asyncio.Event()
-        self._failure_error: TransportError | None = None
+        self._failure_error = None
 
         self._cmd_lock = asyncio.Lock()
-        self._pending: tuple[int, str, asyncio.Future[None]] | None = None
+        self._pending = None
         self._next_seq = secrets.randbits(32)
-        self._subscribers: set[asyncio.Queue[ReceivedFrame]] = set()
+        self._subscribers = set()
 
     async def open(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -67,8 +58,7 @@ class SerialTransport(Transport):
         self._reader.start()
         log.info("serial_open", port=self._port, baud=self._baud)
 
-    def _open_serial(self) -> serial.Serial:
-        return serial.Serial(self._port, self._baud, timeout=0.2)
+    def _open_serial(self) -> serial.Serial: return serial.Serial(self._port, self._baud, timeout=0.2)
 
     async def close(self) -> None:
         self._closing = True
@@ -84,8 +74,7 @@ class SerialTransport(Transport):
         assert self._serial is not None
         assert self._loop is not None
         while not self._closing:
-            try:
-                raw = self._serial.readline()
+            try: raw = self._serial.readline()
             except (serial.SerialException, OSError) as exc:
                 if self._closing: break
                 log.exception("serial_read_failed")
@@ -95,18 +84,15 @@ class SerialTransport(Transport):
             if not raw: continue
             line = raw.decode("ascii", errors="replace").strip()
             if line:
-                if self._raw_recorder is not None:
-                    self._raw_recorder.record_line("rx", line)
+                if self._raw_recorder is not None: self._raw_recorder.record_line("rx", line)
                 self._loop.call_soon_threadsafe(self._handle_line, line)
 
     def _report_failure(self, error: TransportError) -> None:
-        if self._closing or self._failure.is_set():
-            return
+        if self._closing or self._failure.is_set(): return
         self._failure_error = error
         self._failure.set()
         pending = self._pending
-        if pending is not None:
-            self._resolve_pending(pending[0], pending[1], error)
+        if pending is not None: self._resolve_pending(pending[0], pending[1], error)
 
     async def wait_failed(self) -> None:
         await self._failure.wait()
@@ -137,11 +123,7 @@ class SerialTransport(Transport):
         m = ERR_RE.match(line)
         if m:
             log.warning("modem_error", seq=m.group(1), reason=m.group(2))
-            self._resolve_pending(
-                int(m.group(1)),
-                "ERR",
-                TransportError(f"modem error: {m.group(2)}"),
-            )
+            self._resolve_pending(int(m.group(1)), 'ERR', TransportError(f'modem error: {m.group(2)}'))
             return
 
         if READY_RE.match(line):
@@ -157,22 +139,12 @@ class SerialTransport(Transport):
         except (ValueError, FrameError) as exc:
             log.warning("rx_frame_decode_failed", frame_hex=frame_hex, error=str(exc))
             return
-        if self._raw_recorder is not None:
-            self._raw_recorder.record_frame("rx", frame, raw, rssi=rssi)
-        log.debug(
-            "rf_rx",
-            rssi=rssi,
-            to_addr=f"0x{frame.to_addr:02x}",
-            from_addr=f"0x{frame.from_addr:02x}",
-            association_id=f"0x{frame.association_id:02x}",
-            request_id=f"0x{frame.request_id:02x}",
-            msg_type=f"0x{frame.msg_type:02x}",
-            control=f"0x{frame.control:02x}",
-            payload_len=len(frame.payload),
-        )
+        if self._raw_recorder is not None: self._raw_recorder.record_frame("rx", frame, raw, rssi=rssi)
+        log.debug('rf_rx', rssi=rssi, to_addr=f'0x{frame.to_addr:02x}', from_addr=f'0x{frame.from_addr:02x}',
+            association_id=f'0x{frame.association_id:02x}', request_id=f'0x{frame.request_id:02x}', msg_type=f'0x{frame.msg_type:02x}',
+            control=f'0x{frame.control:02x}', payload_len=len(frame.payload))
         received = ReceivedFrame(rssi=rssi, frame=frame, raw=raw)
-        for queue in self._subscribers:
-            queue.put_nowait(received)
+        for queue in self._subscribers: queue.put_nowait(received)
 
     def _resolve_pending(
         self,
@@ -190,10 +162,8 @@ class SerialTransport(Transport):
             return
         fut = pending[2]
         if fut.done(): return
-        if error is None:
-            fut.set_result(None)
-        else:
-            fut.set_exception(error)
+        if error is None: fut.set_result(None)
+        else: fut.set_exception(error)
 
     async def _command(
         self,
@@ -206,26 +176,23 @@ class SerialTransport(Transport):
         async with self._cmd_lock:
             seq = self._next_seq
             self._next_seq = (seq + 1) & 0xFFFFFFFF
-            fut: asyncio.Future[None] = loop.create_future()
+            fut = loop.create_future()
             self._pending = (seq, expected_kind, fut)
             try:
                 command, separator, arguments = line.partition(" ")
                 sequenced = f"{command} @{seq}{separator}{arguments}"
                 formatted = format_cmd(sequenced)
-                if self._raw_recorder is not None:
-                    self._raw_recorder.record_line("tx", formatted.strip())
+                if self._raw_recorder is not None: self._raw_recorder.record_line("tx", formatted.strip())
                 log.debug("modem_command", command=line.split(" ", 1)[0])
                 await loop.run_in_executor(None, self._write, formatted)
                 await asyncio.wait_for(fut, timeout=self._command_timeout)
             except TimeoutError as exc:
                 log.warning("modem_command_timeout", command=line.split(" ", 1)[0], timeout=self._command_timeout)
                 raise TransportError(f"timeout waiting for ack to {line!r}") from exc
-            finally:
-                self._clear_pending(seq, expected_kind, fut)
+            finally: self._clear_pending(seq, expected_kind, fut)
 
     def _clear_pending(self, seq: int, expected_kind: str, fut: asyncio.Future[None]) -> None:
-        if self._pending == (seq, expected_kind, fut):
-            self._pending = None
+        if self._pending == (seq, expected_kind, fut): self._pending = None
 
     def _write(self, text: str) -> None:
         assert self._serial is not None
@@ -233,39 +200,25 @@ class SerialTransport(Transport):
         self._serial.flush()
 
     async def set_network_id(self, network_id: bytes) -> None:
-        if len(network_id) != 4:
-            raise TransportError(f"network id must be 4 bytes, got {len(network_id)}")
+        if len(network_id) != 4: raise TransportError(f"network id must be 4 bytes, got {len(network_id)}")
         await self._command(f"NID {network_id.hex()}")
 
     async def send(self, frame: Frame) -> None:
-        if self._raw_recorder is not None:
-            self._raw_recorder.record_frame("tx", frame, frame.encode(), outcome="attempt")
-        log.debug(
-            "rf_tx",
-            to_addr=f"0x{frame.to_addr:02x}",
-            from_addr=f"0x{frame.from_addr:02x}",
-            association_id=f"0x{frame.association_id:02x}",
-            request_id=f"0x{frame.request_id:02x}",
-            msg_type=f"0x{frame.msg_type:02x}",
-            control=f"0x{frame.control:02x}",
-            payload_len=len(frame.payload),
-        )
+        if self._raw_recorder is not None: self._raw_recorder.record_frame("tx", frame, frame.encode(), outcome="attempt")
+        log.debug('rf_tx', to_addr=f'0x{frame.to_addr:02x}', from_addr=f'0x{frame.from_addr:02x}',
+            association_id=f'0x{frame.association_id:02x}', request_id=f'0x{frame.request_id:02x}', msg_type=f'0x{frame.msg_type:02x}',
+            control=f'0x{frame.control:02x}', payload_len=len(frame.payload))
         await self._command(f"TX {frame.encode().hex()}")
 
-    async def ping(self) -> None:
-        await self._command("PING", expected_kind="PONG")
+    async def ping(self) -> None: await self._command("PING", expected_kind="PONG")
 
-    async def listen(self) -> None:
-        await self._command("LISTEN")
+    async def listen(self) -> None: await self._command("LISTEN")
 
-    async def sleep(self) -> None:
-        await self._command("SLEEP")
+    async def sleep(self) -> None: await self._command("SLEEP")
 
     @contextlib.asynccontextmanager
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[ReceivedFrame]]:
-        queue: asyncio.Queue[ReceivedFrame] = asyncio.Queue()
+        queue = asyncio.Queue()
         self._subscribers.add(queue)
-        try:
-            yield queue
-        finally:
-            self._subscribers.discard(queue)
+        try: yield queue
+        finally: self._subscribers.discard(queue)

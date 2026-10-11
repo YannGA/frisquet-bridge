@@ -1,4 +1,4 @@
-"""Tests for learned zone-state persistence."""
+'Tests for learned zone-state persistence.'
 
 from __future__ import annotations
 
@@ -93,10 +93,7 @@ def test_load_handles_absent_corrupt_and_legacy_payloads(tmp_path: Path):
     assert corrupt.zones[1].schedule is None
 
     legacy_path = tmp_path / "legacy.state.json"
-    legacy_path.write_text(
-        '{"1": {"mode": "Auto", "mode_options": 16, "comfort_temperature": 20.0}}',
-        encoding="utf-8",
-    )
+    legacy_path.write_text('{"1": {"mode": "Auto", "mode_options": 16, "comfort_temperature": 20.0}}', encoding='utf-8')
     legacy = BoilerData()
     load_zone_state(legacy_path, legacy)
     zone = legacy.zones[1]

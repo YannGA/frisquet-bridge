@@ -17,12 +17,12 @@ from frisquet_bridge.frame import Frame
 
 
 class TransportError(Exception):
-    """Raised on modem communication failures (NACK, timeout, I/O)."""
+    'Raised on modem communication failures (NACK, timeout, I/O).'
 
 
 @dataclass(frozen=True, slots=True)
 class ReceivedFrame:
-    """An RF frame received by the modem, with signal strength."""
+    'An RF frame received by the modem, with signal strength.'
 
     rssi: int
     frame: Frame
@@ -30,42 +30,41 @@ class ReceivedFrame:
 
 
 class Transport(abc.ABC):
-    """Async modem transport."""
+    'Async modem transport.'
 
     async def __aenter__(self) -> Transport:
         await self.open()
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
-        await self.close()
+    async def __aexit__(self, *exc: object) -> None: await self.close()
 
     @abc.abstractmethod
     async def open(self) -> None:
-        """Open the underlying link and start reading."""
+        'Open the underlying link and start reading.'
 
     @abc.abstractmethod
     async def close(self) -> None:
-        """Stop reading and release the link."""
+        'Stop reading and release the link.'
 
     @abc.abstractmethod
     async def set_network_id(self, network_id: bytes) -> None:
-        """Set the 4-byte RF sync word."""
+        'Set the 4-byte RF sync word.'
 
     @abc.abstractmethod
     async def send(self, frame: Frame) -> None:
-        """Transmit a frame (waits for the modem's OK/ERR)."""
+        "Transmit a frame (waits for the modem's OK/ERR)."
 
     @abc.abstractmethod
     async def listen(self) -> None:
-        """Put the modem into continuous receive mode."""
+        'Put the modem into continuous receive mode.'
 
     @abc.abstractmethod
     async def sleep(self) -> None:
-        """Put the modem radio idle."""
+        'Put the modem radio idle.'
 
     @abc.abstractmethod
     async def wait_failed(self) -> None:
-        """Wait until the transport suffers an unrecoverable background failure."""
+        'Wait until the transport suffers an unrecoverable background failure.'
 
     @abc.abstractmethod
     def subscribe(self) -> AbstractAsyncContextManager[asyncio.Queue[ReceivedFrame]]:
@@ -76,7 +75,6 @@ class Transport(abc.ABC):
         """
 
     async def frames(self) -> AsyncIterator[ReceivedFrame]:
-        """Yield received frames as they arrive."""
+        'Yield received frames as they arrive.'
         async with self.subscribe() as queue:
-            while True:
-                yield await queue.get()
+            while True: yield await queue.get()
