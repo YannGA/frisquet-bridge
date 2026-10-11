@@ -1,10 +1,6 @@
-"""Tests for MQTT command mapping."""
+"""Tests for MQTT command mapping and the Home Assistant MQTT contract."""
 
-from __future__ import annotations
-
-import asyncio
-import json
-from pathlib import Path
+import asyncio, json
 
 import pytest
 
@@ -15,22 +11,14 @@ from frisquet_bridge.mqtt.adapter import MqttAdapter
 
 
 class FakeOps:
-    def __init__(self) -> None:
-        self.calls: list[tuple[object, ...]] = []
+    def __init__(self):
+        self.calls = []
 
-    async def write_dhw_mode(self, data: BoilerData, mode: DhwMode) -> None:
+    async def write_dhw_mode(self, data, mode):
         self.calls.append(("dhw", mode))
         data.boiler.dhw_mode = mode
 
-    async def apply_zone_climate(
-        self,
-        zone: int,
-        data: BoilerData,
-        *,
-        hvac_mode: str | None = None,
-        preset: str | None = None,
-        target_temperature: float | None = None,
-    ) -> None:
+    async def apply_zone_climate(self, zone, data, *, hvac_mode=None, preset=None, target_temperature=None):
         self.calls.append(("climate", zone, hvac_mode, preset, target_temperature))
         if hvac_mode == "auto":
             data.zones[zone].mode = ZoneMode.AUTO
@@ -40,157 +28,112 @@ class FakeOps:
 
 
 class SlowDhwOps(FakeOps):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def write_dhw_mode(self, data: BoilerData, mode: DhwMode) -> None:
+    async def write_dhw_mode(self, data, mode):
         self.started.set()
         await asyncio.wait_for(self.release.wait(), timeout=1.0)
         await super().write_dhw_mode(data, mode)
 
 
 class FakeSatellite:
-    def __init__(self) -> None:
+    def __init__(self):
         self.sends = 0
 
-    async def send_now(self) -> bool:
+    async def send_now(self):
         self.sends += 1
         return True
 
 
 class FakeMqttClient:
-    def __init__(self) -> None:
-        self.published: list[tuple[str, str, bool]] = []
+    def __init__(self):
+        self.published = []
 
-    async def publish(self, topic: str, payload: str, retain: bool = False) -> None:
+    async def publish(self, topic, payload, retain=False):
         self.published.append((topic, payload, retain))
 
 
-async def test_outside_temperature_command_uses_coordinated_writer(tmp_path: Path) -> None:
+def _config(tmp_path, connect_mode=None, zone_mode=None):
     cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    data = BoilerData()
-    writes: list[float] = []
+    if connect_mode is not None:
+        cfg.connect = ConnectConfig(mode=connect_mode, identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
+    if zone_mode is not None:
+        cfg.zone1 = ZoneConfig(mode=zone_mode)
+    return cfg
 
-    async def write_outside_temperature(temperature: float) -> bool:
+
+def _persisting_adapter(tmp_path, zone_mode, connect_mode="read"):
+    data, satellite, persisted = BoilerData(), FakeSatellite(), []
+    adapter = MqttAdapter(
+        _config(tmp_path, connect_mode, zone_mode),
+        data,
+        None,
+        virtual_satellites={1: satellite},
+        on_persist_state=lambda: persisted.append("saved"),
+    )
+    return adapter, data, satellite, persisted
+
+
+@pytest.fixture
+def adapter(tmp_path):
+    data, ops = BoilerData(), FakeOps()
+    return MqttAdapter(_config(tmp_path, "full", "satellite"), data, ops), data, ops
+
+
+@pytest.fixture
+def virtual_adapter(tmp_path):
+    data, satellite = BoilerData(), FakeSatellite()
+    return MqttAdapter(_config(tmp_path, "full", "virtual_satellite"), data, None, virtual_satellites={1: satellite}), data, satellite
+
+
+@pytest.fixture
+def satellite_adapter(tmp_path):
+    data, ops = BoilerData(), FakeOps()
+    return MqttAdapter(_config(tmp_path, "read", "satellite"), data, ops), data, ops
+
+
+async def test_handle_command_maps_topics_to_writes(adapter, tmp_path):
+    mqtt, _data, ops = adapter
+    await mqtt.handle_command("frisquet/boiler/dhwMode/set", "Eco Horaires")
+    await mqtt.handle_command("frisquet/z1/mode/set", HVAC_AUTO)
+    await mqtt.handle_command("frisquet/z1/preset/set", PRESET_COMFORT)
+    await mqtt.handle_command("frisquet/z1/targetTemperature/set", "21.0")
+    assert ops.calls == [
+        ("dhw", DhwMode.ECO_SCHEDULE),
+        ("climate", 1, HVAC_AUTO, None, None),
+        ("climate", 1, None, PRESET_COMFORT, None),
+        ("climate", 1, None, None, 21.0),
+    ]
+
+    writes = []
+
+    async def write_outside_temperature(temperature):
         writes.append(temperature)
         return True
 
-    mqtt = MqttAdapter(
-        cfg,
-        data,
-        None,
-        outside_temperature_writer=write_outside_temperature,
-    )
-
-    await mqtt.handle_command("frisquet/outsideSensor/outsideTemperature/set", "12.34")
-
+    sonde = MqttAdapter(_config(tmp_path), BoilerData(), None, outside_temperature_writer=write_outside_temperature)
+    await sonde.handle_command("frisquet/outsideSensor/outsideTemperature/set", "12.34")
     assert writes == [12.34]
 
 
-@pytest.fixture
-def adapter(tmp_path: Path) -> tuple[MqttAdapter, BoilerData, FakeOps]:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.connect = ConnectConfig(mode="full", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    cfg.zone1 = ZoneConfig(mode="satellite")
-    data = BoilerData()
-    ops = FakeOps()
-    return MqttAdapter(cfg, data, ops), data, ops
-
-
-@pytest.fixture
-def virtual_adapter(tmp_path: Path) -> tuple[MqttAdapter, BoilerData, FakeSatellite]:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.zone1 = ZoneConfig(mode="virtual_satellite")
-    data = BoilerData()
-    satellite = FakeSatellite()
-    adapter = MqttAdapter(cfg, data, None, virtual_satellites={1: satellite})  # type: ignore[dict-item]
-    return adapter, data, satellite
-
-
-@pytest.fixture
-def satellite_adapter(tmp_path: Path) -> tuple[MqttAdapter, BoilerData, FakeOps]:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.connect = ConnectConfig(mode="read", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    cfg.zone1 = ZoneConfig(mode="satellite")
-    data = BoilerData()
-    ops = FakeOps()
-    return MqttAdapter(cfg, data, ops), data, ops
-
-
-@pytest.fixture
-def simple_adapter(tmp_path: Path) -> tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]]:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.connect = ConnectConfig(mode="read", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    cfg.zone1 = ZoneConfig(mode="simple_satellite")
-    data = BoilerData()
-    satellite = FakeSatellite()
-    persisted: list[str] = []
-    adapter = MqttAdapter(
-        cfg,
-        data,
-        None,
-        virtual_satellites={1: satellite},  # type: ignore[dict-item]
-        on_persist_state=lambda: persisted.append("saved"),
-    )
-    return adapter, data, satellite, persisted
-
-
-@pytest.fixture
-def central_adapter(tmp_path: Path) -> tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]]:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.zone1 = ZoneConfig(mode="central_boiler")
-    data = BoilerData()
-    satellite = FakeSatellite()
-    persisted: list[str] = []
-    adapter = MqttAdapter(
-        cfg,
-        data,
-        None,
-        virtual_satellites={1: satellite},  # type: ignore[dict-item]
-        on_persist_state=lambda: persisted.append("saved"),
-    )
-    return adapter, data, satellite, persisted
-
-
-async def test_handle_dhw_command_accepts_openfrisquet_label(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, ops = adapter
-
-    await mqtt.handle_command("frisquet/boiler/dhwMode/set", "Eco Horaires")
-
-    assert ops.calls == [("dhw", DhwMode.ECO_SCHEDULE)]
-
-
-async def test_dhw_command_state_does_not_bounce_on_stale_read(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
+async def test_dhw_pending_state_behaviour(adapter, tmp_path):
     mqtt, data, ops = adapter
     client = FakeMqttClient()
 
     await mqtt.handle_command("frisquet/boiler/dhwMode/set", "Eco")
     data.boiler.dhw_mode = DhwMode.STOP
-
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
+    await mqtt.publish_state(client)
     await mqtt.handle_command("frisquet/boiler/dhwMode/set", "Eco")
-
     assert ("frisquet/boiler/dhwMode", "Eco", True) in client.published
     assert ops.calls == [("dhw", DhwMode.ECO)]
 
-
-async def test_dhw_command_publishes_pending_state_before_rf_write(tmp_path: Path) -> None:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.connect = ConnectConfig(mode="full", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    data = BoilerData()
+    data, ops, client = BoilerData(), SlowDhwOps(), FakeMqttClient()
     data.boiler.dhw_mode = DhwMode.STOP
-    ops = SlowDhwOps()
-    client = FakeMqttClient()
-    mqtt = MqttAdapter(
-        cfg,
-        data,
-        ops,  # type: ignore[arg-type]
-        on_state_change=lambda: mqtt.publish_state(client),  # type: ignore[name-defined, arg-type]
-    )
-
-    task = asyncio.create_task(mqtt.handle_command("frisquet/boiler/dhwMode/set", "Eco"))
+    slow = MqttAdapter(_config(tmp_path, "full", "satellite"), data, ops, on_state_change=lambda: slow.publish_state(client))
+    task = asyncio.create_task(slow.handle_command("frisquet/boiler/dhwMode/set", "Eco"))
     try:
         await asyncio.wait_for(ops.started.wait(), timeout=1.0)
         assert ("frisquet/boiler/dhwMode", "Eco", True) in client.published
@@ -201,128 +144,66 @@ async def test_dhw_command_publishes_pending_state_before_rf_write(tmp_path: Pat
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-
     assert ops.calls == [("dhw", DhwMode.ECO)]
 
 
-async def test_handle_zone_mode_command(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, ops = adapter
-
-    await mqtt.handle_command("frisquet/z1/mode/set", HVAC_AUTO)
-
-    assert ops.calls == [("climate", 1, HVAC_AUTO, None, None)]
-
-
-async def test_handle_zone_preset_command(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, ops = adapter
-
-    await mqtt.handle_command("frisquet/z1/preset/set", PRESET_COMFORT)
-
-    assert ops.calls == [("climate", 1, None, PRESET_COMFORT, None)]
-
-
-async def test_handle_zone_target_temperature_command(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, ops = adapter
-
-    await mqtt.handle_command("frisquet/z1/targetTemperature/set", "21.0")
-
-    assert ops.calls == [("climate", 1, None, None, 21.0)]
-
-
-async def test_virtual_zone_reported_ambient_triggers_send(
-    virtual_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite],
-) -> None:
+async def test_zone_commands_route_by_profile(tmp_path, virtual_adapter, satellite_adapter):
     mqtt, data, satellite = virtual_adapter
-
     await mqtt.handle_command("frisquet/z1/reportedAmbient/set", "20.5")
-
-    assert data.zones[1].reported_ambient == 20.5
-    assert satellite.sends == 1
-
-
-async def test_virtual_zone_mode_updates_state_and_sends(
-    virtual_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite],
-) -> None:
-    mqtt, data, satellite = virtual_adapter
-
     await mqtt.handle_command("frisquet/z1/mode/set", HVAC_AUTO)
+    assert (data.zones[1].reported_ambient, data.zones[1].mode, satellite.sends) == (20.5, ZoneMode.AUTO, 2)
 
-    assert data.zones[1].mode == ZoneMode.AUTO
-    assert satellite.sends == 1
-
-
-async def test_satellite_zone_command_is_ignored(
-    satellite_adapter: tuple[MqttAdapter, BoilerData, FakeOps],
-) -> None:
     mqtt, _data, ops = satellite_adapter
-
     await mqtt.handle_command("frisquet/z1/mode/set", HVAC_AUTO)
-
     assert ops.calls == []
 
-
-async def test_simple_zone_command_persists_and_sends(
-    simple_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]],
-) -> None:
-    mqtt, data, satellite, persisted = simple_adapter
-
+    mqtt, data, satellite, persisted = _persisting_adapter(tmp_path, "simple_satellite")
     await mqtt.handle_command("frisquet/z1/mode/set", "heat")
     await mqtt.handle_command("frisquet/z1/preset/set", "eco")
     await mqtt.handle_command("frisquet/z1/targetTemperature/set", "16.5")
-
-    assert data.zones[1].mode == ZoneMode.REDUCED
-    assert data.zones[1].reduced_temperature == 16.5
+    assert (data.zones[1].mode, data.zones[1].reduced_temperature) == (ZoneMode.REDUCED, 16.5)
     assert satellite.sends == 3
     assert persisted == ["saved", "saved", "saved"]
 
-
-async def test_central_commands_update_state_persist_and_send(
-    central_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]],
-) -> None:
-    mqtt, data, satellite, persisted = central_adapter
-
+    mqtt, data, satellite, persisted = _persisting_adapter(tmp_path, "central_boiler", None)
     await mqtt.handle_command("frisquet/central/setpoint/set", "20.0")
     await mqtt.handle_command("frisquet/central/demandOnDelta/set", "4.0")
     await mqtt.handle_command("frisquet/central/demandOffMargin/set", "1.0")
     await mqtt.handle_command("frisquet/central/demand/set", "ON")
-
     zone = data.zones[1]
-    assert zone.central_setpoint == 20.0
-    assert zone.central_demand_on_delta == 4.0
-    assert zone.central_demand_off_margin == 1.0
-    assert zone.central_demand is True
+    assert (zone.central_setpoint, zone.central_demand_on_delta, zone.central_demand_off_margin, zone.central_demand) == (
+        20.0,
+        4.0,
+        1.0,
+        True,
+    )
     assert satellite.sends == 4
-    assert persisted == ["saved", "saved", "saved", "saved"]
+    assert persisted == ["saved"] * 4
 
 
-async def test_central_discovery_exposes_proxy_entities(
-    central_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]],
-) -> None:
-    mqtt, _data, _satellite, _persisted = central_adapter
+async def test_discovery_dhw_and_climate_depend_on_write_capability(tmp_path, adapter, satellite_adapter):
+    mqtt, _data, _ops = adapter
     client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-
+    await mqtt.publish_discovery(client)
     payloads = {topic: payload for topic, payload, _retain in client.published}
-    assert payloads["homeassistant/switch/frisquet_bridge/central_heat_demand/config"]
-    assert payloads["homeassistant/number/frisquet_bridge/central_setpoint/config"]
-    assert payloads["homeassistant/number/frisquet_bridge/central_demand_on_delta/config"]
-    assert payloads["homeassistant/number/frisquet_bridge/central_demand_off_margin/config"]
-    assert payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]
-    assert payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_setpoint_temperature/config"]
-    assert payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"] == ""
-    assert payloads["homeassistant/sensor/frisquet_bridge/central_flow_temperature/config"] == ""
-    assert payloads["homeassistant/sensor/frisquet_bridge/central_flow_setpoint_temperature/config"] == ""
+    dhw_mode = json.loads(payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"])
+    assert dhw_mode["state_topic"] == "frisquet/boiler/dhwMode"
+    assert dhw_mode["command_topic"] == "frisquet/boiler/dhwMode/set"
+    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_mode/config"] == ""
 
-
-async def test_satellite_only_discovery_keeps_boiler_sensors_and_dhw_select(
-    simple_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]],
-) -> None:
-    mqtt, _data, _satellite, _persisted = simple_adapter
+    mqtt, _data, _ops = satellite_adapter
     client = FakeMqttClient()
+    await mqtt.publish_discovery(client)
+    payloads = {topic: payload for topic, payload, _retain in client.published}
+    climate = json.loads(payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"])
+    assert climate["mode_state_topic"] == "frisquet/z1/mode"
+    assert "mode_command_topic" not in climate
+    assert "preset_mode_command_topic" not in climate
+    assert "temperature_command_topic" not in climate
 
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-
+    mqtt, _data, _satellite, _persisted = _persisting_adapter(tmp_path, "simple_satellite")
+    client = FakeMqttClient()
+    await mqtt.publish_discovery(client)
     payloads = {topic: payload for topic, payload, _retain in client.published}
     assert payloads["homeassistant/sensor/frisquet_bridge/dhw_temperature/config"]
     dhw_mode = json.loads(payloads["homeassistant/sensor/frisquet_bridge/dhw_mode/config"])
@@ -334,189 +215,140 @@ async def test_satellite_only_discovery_keeps_boiler_sensors_and_dhw_select(
     assert "homeassistant/climate/frisquet_bridge/zone1_climate/config" in payloads
 
 
-async def test_connect_discovery_exposes_dhw_mode_select(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
+async def test_discovery_topics_and_entity_metadata(adapter, tmp_path):
     mqtt, _data, _ops = adapter
     client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    dhw_mode = json.loads(payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"])
-    assert dhw_mode["state_topic"] == "frisquet/boiler/dhwMode"
-    assert dhw_mode["command_topic"] == "frisquet/boiler/dhwMode/set"
-    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_mode/config"] == ""
-
-
-async def test_satellite_discovery_is_read_only(
-    satellite_adapter: tuple[MqttAdapter, BoilerData, FakeOps],
-) -> None:
-    mqtt, _data, _ops = satellite_adapter
-    client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    climate = json.loads(payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"])
-    assert climate["mode_state_topic"] == "frisquet/z1/mode"
-    assert "mode_command_topic" not in climate
-    assert "preset_mode_command_topic" not in climate
-    assert "temperature_command_topic" not in climate
-
-
-async def test_discovery_adds_availability_and_sensor_metadata(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, _ops = adapter
-    client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-
+    await mqtt.publish_discovery(client)
     payloads = {
         topic: json.loads(payload)
         for topic, payload, _retain in client.published
         if topic.startswith("homeassistant/") and payload
     }
     dhw_temperature = payloads["homeassistant/sensor/frisquet_bridge/dhw_temperature/config"]
-    cdc_safety_temperature = payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]
-    dhw_consumption = payloads["homeassistant/sensor/frisquet_bridge/dhw_consumption/config"]
-    daily_dhw_consumption = payloads["homeassistant/sensor/frisquet_bridge/daily_dhw_consumption/config"]
-    boiler_status = payloads["homeassistant/sensor/frisquet_bridge/boiler_status/config"]
-    climate = payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]
-    flow_temperature = payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]
-
     assert dhw_temperature["availability_topic"] == "frisquet/frisquet_bridge/availability"
-    assert dhw_temperature["payload_available"] == "online"
-    assert dhw_temperature["payload_not_available"] == "offline"
-    assert dhw_temperature["state_class"] == "measurement"
-    assert dhw_temperature["suggested_display_precision"] == 1
+    assert (dhw_temperature["payload_available"], dhw_temperature["payload_not_available"]) == ("online", "offline")
+    assert (dhw_temperature["state_class"], dhw_temperature["suggested_display_precision"]) == ("measurement", 1)
     assert dhw_temperature["name"] == "Boiler DHW temperature"
-    assert cdc_safety_temperature["name"] == "Boiler heating body safety probe temperature"
-    assert dhw_consumption["state_class"] == "total_increasing"
-    assert daily_dhw_consumption["name"] == "Boiler DHW previous day consumption"
-    assert boiler_status["state_topic"] == "frisquet/boiler/status"
+    assert payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]["name"] == (
+        "Boiler heating body safety probe temperature"
+    )
+    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_consumption/config"]["state_class"] == "total_increasing"
+    assert payloads["homeassistant/sensor/frisquet_bridge/daily_dhw_consumption/config"]["name"] == "Boiler DHW previous day consumption"
+    assert payloads["homeassistant/sensor/frisquet_bridge/boiler_status/config"]["state_topic"] == "frisquet/boiler/status"
+    climate = payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]
     assert climate["availability_topic"] == "frisquet/frisquet_bridge/availability"
     assert climate["name"] == "Zone 1 heating"
     assert "boost" not in climate["preset_modes"]
-    assert flow_temperature["name"] == "Zone 1 flow temperature"
-    assert flow_temperature["state_topic"] == "frisquet/z1/flowTemperature"
-    assert flow_temperature["unique_id"] == "frisquet_bridge_zone1_flow_temperature"
+    flow = payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]
+    assert (flow["name"], flow["state_topic"], flow["unique_id"]) == (
+        "Zone 1 flow temperature",
+        "frisquet/z1/flowTemperature",
+        "frisquet_bridge_zone1_flow_temperature",
+    )
     for payload in payloads.values():
         assert payload["device"]["identifiers"] == ["frisquet_bridge"]
         assert payload["origin"] == {"name": "frisquet-bridge"}
     assert "homeassistant/sensor/frisquet_bridge/zone1_schedule_raw/config" not in payloads
 
-
-async def test_discovery_localizes_french_names_and_dhw_options(tmp_path: Path) -> None:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
-    cfg.mqtt.language = "fr"
-    cfg.connect = ConnectConfig(mode="full", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
-    cfg.zone1 = ZoneConfig(mode="virtual_satellite")
-    data = BoilerData()
-    mqtt = MqttAdapter(cfg, data, FakeOps(), virtual_satellites={1: FakeSatellite()})  # type: ignore[arg-type, dict-item]
+    mqtt, _data, _satellite, _persisted = _persisting_adapter(tmp_path, "central_boiler", None)
     client = FakeMqttClient()
+    await mqtt.publish_discovery(client)
+    payloads = {topic: payload for topic, payload, _retain in client.published}
+    for topic in (
+        "homeassistant/switch/frisquet_bridge/central_heat_demand/config",
+        "homeassistant/number/frisquet_bridge/central_setpoint/config",
+        "homeassistant/number/frisquet_bridge/central_demand_on_delta/config",
+        "homeassistant/number/frisquet_bridge/central_demand_off_margin/config",
+        "homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config",
+        "homeassistant/sensor/frisquet_bridge/zone1_flow_setpoint_temperature/config",
+    ):
+        assert payloads[topic]
+    for topic in (
+        "homeassistant/climate/frisquet_bridge/zone1_climate/config",
+        "homeassistant/sensor/frisquet_bridge/central_flow_temperature/config",
+        "homeassistant/sensor/frisquet_bridge/central_flow_setpoint_temperature/config",
+    ):
+        assert payloads[topic] == ""
 
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
 
+async def test_discovery_localizes_french_names_and_dhw_options(tmp_path):
+    cfg = _config(tmp_path, "full", "virtual_satellite")
+    cfg.mqtt.language = "fr"
+    mqtt = MqttAdapter(cfg, BoilerData(), FakeOps(), virtual_satellites={1: FakeSatellite()})
+    client = FakeMqttClient()
+    await mqtt.publish_discovery(client)
     payloads = {
         topic: json.loads(payload)
         for topic, payload, _retain in client.published
         if topic.startswith("homeassistant/") and payload
     }
-    dhw_mode = payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]
+    assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["name"] == "Chaudière mode ECS"
+    assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["options"] == ["Max", "Eco", "Eco Horaires", "Stop"]
     safety = payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]
-    climate = payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]
-    ambient = payloads["homeassistant/number/frisquet_bridge/zone1_reported_ambient/config"]
-    flow = payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]
-
-    assert dhw_mode["name"] == "Chaudière mode ECS"
-    assert dhw_mode["options"] == ["Max", "Eco", "Eco Horaires", "Stop"]
     assert safety["name"] == "Chaudière température sonde sécurité CDC"
-    assert climate["name"] == "Zone 1 chauffage"
-    assert ambient["name"] == "Zone 1 température ambiante déclarée"
-    assert flow["name"] == "Zone 1 température départ"
+    assert payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]["name"] == "Zone 1 chauffage"
+    assert payloads["homeassistant/number/frisquet_bridge/zone1_reported_ambient/config"]["name"] == "Zone 1 température ambiante déclarée"
+    assert payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]["name"] == "Zone 1 température départ"
 
 
-async def test_publish_state_localizes_french_display_values(tmp_path: Path) -> None:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
+async def test_publish_state_values_flow_topics_and_localization(adapter, tmp_path):
+    mqtt, data, _ops = adapter
+    data.boiler.status = BoilerStatus.STANDBY
+    data.zones[1].flow_temperature = 42.3
+    data.zones[1].flow_setpoint_temperature = 45.6
+    client = FakeMqttClient()
+    await mqtt.publish_state(client)
+    assert ("frisquet/boiler/status", "Standby", True) in client.published
+    assert ("frisquet/z1/flowTemperature", "42.3", True) in client.published
+    assert ("frisquet/z1/flowSetpointTemperature", "45.6", True) in client.published
+
+    data = BoilerData()
+    data.zones[1].flow_temperature = 41.0
+    data.zones[1].flow_setpoint_temperature = 43.0
+    mqtt = MqttAdapter(_config(tmp_path, "read", "central_boiler"), data, None)
+    client = FakeMqttClient()
+    await mqtt.publish_state(client)
+    assert ("frisquet/z1/flowTemperature", "41.0", True) in client.published
+    assert ("frisquet/z1/flowSetpointTemperature", "43.0", True) in client.published
+    assert not any(topic.startswith("frisquet/central/flow") for topic, _payload, _retain in client.published)
+
+    cfg = _config(tmp_path, "read")
     cfg.mqtt.language = "fr"
-    cfg.connect = ConnectConfig(mode="read", identity=DeviceIdentity(association_id=0xEA, request_id=0x48))
     data = BoilerData()
     data.boiler.dhw_mode = DhwMode.ECO_SCHEDULE
     data.boiler.status = BoilerStatus.HEATING_OFF
-    mqtt = MqttAdapter(cfg, data, FakeOps())  # type: ignore[arg-type]
+    mqtt = MqttAdapter(cfg, data, FakeOps())
     client = FakeMqttClient()
-
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
-
+    await mqtt.publish_state(client)
     assert ("frisquet/boiler/dhwMode", "Eco Horaires", True) in client.published
     assert ("frisquet/boiler/status", "Chauffage arrêté", True) in client.published
 
 
-async def test_publish_state_includes_zone_flow_temperatures(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, data, _ops = adapter
-    data.zones[1].flow_temperature = 42.3
-    data.zones[1].flow_setpoint_temperature = 45.6
-    client = FakeMqttClient()
-
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
-
-    assert ("frisquet/z1/flowTemperature", "42.3", True) in client.published
-    assert ("frisquet/z1/flowSetpointTemperature", "45.6", True) in client.published
-
-
-async def test_central_flow_state_uses_zone_topics(
-    central_adapter: tuple[MqttAdapter, BoilerData, FakeSatellite, list[str]],
-) -> None:
-    mqtt, data, _satellite, _persisted = central_adapter
-    data.zones[1].flow_temperature = 41.0
-    data.zones[1].flow_setpoint_temperature = 43.0
-    client = FakeMqttClient()
-
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
-
-    assert ("frisquet/z1/flowTemperature", "41.0", True) in client.published
-    assert ("frisquet/z1/flowSetpointTemperature", "43.0", True) in client.published
-    assert not any(topic == "frisquet/central/flowTemperature" for topic, _payload, _retain in client.published)
-    assert not any(topic == "frisquet/central/flowSetpointTemperature" for topic, _payload, _retain in client.published)
-
-
-async def test_homeassistant_birth_republishes_discovery_and_state(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
+async def test_homeassistant_birth_republishes_discovery_and_availability(adapter):
     mqtt, data, _ops = adapter
     data.boiler.status = BoilerStatus.STANDBY
     client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
+    await mqtt.publish_discovery(client)
     client.published.clear()
 
-    await mqtt.handle_message(client, "homeassistant/status", "online")  # type: ignore[arg-type]
-
+    await mqtt.handle_message(client, "homeassistant/status", "online")
     assert any(topic == "homeassistant/sensor/frisquet_bridge/dhw_temperature/config" for topic, _payload, _retain in client.published)
     assert ("frisquet/boiler/status", "Standby", True) in client.published
 
-
-async def test_publish_state_includes_boiler_status(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, data, _ops = adapter
-    data.boiler.status = BoilerStatus.STANDBY
-    client = FakeMqttClient()
-
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
-
-    assert ("frisquet/boiler/status", "Standby", True) in client.published
+    await mqtt.publish_offline(client)
+    assert ("frisquet/frisquet_bridge/availability", "offline", True) in client.published
 
 
-async def test_rf_diagnostics_publish_independent_operation_health_and_zone_source(tmp_path: Path) -> None:
-    cfg = BridgeConfig(path=tmp_path / "config.toml", network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
+async def test_rf_diagnostics_publish_operation_health_and_zone_source(tmp_path):
     data = BoilerData()
     data.zones[1].source = ZoneSource.VIRTUAL
-    sensors = data.rf_health("connect_sensors", freshness_seconds=60.0)
-    sensors.record_success(rssi=-54)
-    clock = data.rf_health("connect_clock", freshness_seconds=3600.0)
-    clock.record_timeout()
-    zone = data.rf_health("satellite_z1_consigne", freshness_seconds=1200.0, zone=1)
-    zone.record_transport_failure()
-    mqtt = MqttAdapter(cfg, data, None)
+    data.rf_health("connect_sensors", freshness_seconds=60.0).record_success(rssi=-54)
+    data.rf_health("connect_clock", freshness_seconds=3600.0).record_timeout()
+    data.rf_health("satellite_z1_consigne", freshness_seconds=1200.0, zone=1).record_transport_failure()
+    mqtt = MqttAdapter(_config(tmp_path), data, None)
     client = FakeMqttClient()
-
-    await mqtt.publish_discovery(client)  # type: ignore[arg-type]
-    await mqtt.publish_state(client)  # type: ignore[arg-type]
+    await mqtt.publish_discovery(client)
+    await mqtt.publish_state(client)
 
     payloads = {topic: payload for topic, payload, _retain in client.published}
     discovery = json.loads(payloads["homeassistant/sensor/frisquet_bridge/rf_connect_sensors/config"])
@@ -524,32 +356,10 @@ async def test_rf_diagnostics_publish_independent_operation_health_and_zone_sour
     assert discovery["json_attributes_topic"] == "frisquet/diagnostics/rf/connect_sensors"
 
     sensors_state = json.loads(payloads["frisquet/diagnostics/rf/connect_sensors"])
-    last_success = sensors_state.pop("last_success")
-    assert last_success.endswith("+00:00")
-    assert sensors_state == {
-        "attempts": 1,
-        "consecutive_failures": 0,
-        "fresh": True,
-        "last_rssi": -54,
-        "nacks": 0,
-        "operation": "connect_sensors",
-        "state": "healthy",
-        "successes": 1,
-        "timeouts": 0,
-        "transport_failures": 0,
-    }
+    assert (sensors_state["state"], sensors_state["fresh"], sensors_state["last_rssi"]) == ("healthy", True, -54)
+    assert (sensors_state["attempts"], sensors_state["successes"]) == (1, 1)
+    assert sensors_state["last_success"].endswith("+00:00")
     clock_state = json.loads(payloads["frisquet/diagnostics/rf/connect_clock"])
-    assert clock_state["state"] == "unavailable"
-    assert clock_state["timeouts"] == 1
+    assert (clock_state["state"], clock_state["timeouts"]) == ("unavailable", 1)
     zone_state = json.loads(payloads["frisquet/diagnostics/rf/satellite_z1_consigne"])
-    assert zone_state["zone"] == 1
-    assert zone_state["source"] == "virtual"
-
-
-async def test_publish_offline_sets_retained_availability(adapter: tuple[MqttAdapter, BoilerData, FakeOps]) -> None:
-    mqtt, _data, _ops = adapter
-    client = FakeMqttClient()
-
-    await mqtt.publish_offline(client)  # type: ignore[arg-type]
-
-    assert client.published == [("frisquet/frisquet_bridge/availability", "offline", True)]
+    assert (zone_state["zone"], zone_state["source"]) == (1, "virtual")

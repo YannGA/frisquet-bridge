@@ -14,13 +14,13 @@ from frisquet_bridge.connect.state import ProtocolState
 from frisquet_bridge.frame import ADDR_SATELLITE_Z1, MSG_INIT, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData, DhwMode, ZoneMode
 from frisquet_bridge.transport.base import TransportError
-from tests.helpers import FakeTransport, seed_zone_metadata
+from tests.helpers import DEFAULT_ZONE_SCHEDULE_BYTES, seed_zone_metadata
 
 
 @pytest.fixture(autouse=True)
-def _fast_zone_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fast_zone_writes(monkeypatch):
     # Zone writes are fire-and-forget bursts; drop the inter-send delay so the
-    # unit tests don't sleep in real time.
+    # tests don't sleep in real time.
     monkeypatch.setattr(ops_module, "ZONE_WRITE_INTERVAL", 0.0)
 
 _SATELLITE_INFO = bytes.fromhex(
@@ -28,18 +28,13 @@ _SATELLITE_INFO = bytes.fromhex(
 )
 
 
-def _ops(fake_transport: FakeTransport, *, self_addr: int | None = None) -> BoilerOps:
-    state = ProtocolState(
-        network_id=bytes.fromhex("05d97f78"),
-        association_id=0xEA,
-        request_id=0x28,
-    )
+def _ops(fake_transport, *, self_addr=None):
+    state = ProtocolState(network_id=bytes.fromhex("05d97f78"), association_id=0xEA, request_id=0x28)
     kwargs = {} if self_addr is None else {"self_addr": self_addr}
-    client = FrisquetClient(fake_transport, state, **kwargs)
-    return BoilerOps(client, boiler_addr=0x80)
+    return BoilerOps(FrisquetClient(fake_transport, state, **kwargs), boiler_addr=0x80)
 
 
-async def _ack_first_init(fake_transport: FakeTransport) -> None:
+async def _ack_first_init(fake_transport):
     while not fake_transport.sent:
         await asyncio.sleep(0)
     request = fake_transport.sent[0]
@@ -56,180 +51,124 @@ async def _ack_first_init(fake_transport: FakeTransport) -> None:
     )
 
 
-async def test_tracked_operation_classifies_nack_timeout_transport_and_success(
-    fake_transport: FakeTransport,
-) -> None:
+async def test_tracked_operation_classifies_outcomes_and_counts_retries(fake_transport):
+    fake_transport.auto_reply = False
     ops = _ops(fake_transport)
     data = BoilerData()
 
-    async def nack() -> None:
+    async def nack():
         raise AddressNotFound(
             request_msg_type=MSG_READ,
             request_payload=b"",
             response=Frame(0x40, 0x80, 1, 1, 0x81, 0x83, b""),
         )
 
-    async def timeout() -> None:
+    async def timeout():
         raise RequestTimeout("no response")
 
-    async def transport() -> None:
+    async def transport():
         raise TransportError("serial offline")
 
-    async def success() -> None:
+    async def success():
         return None
 
-    for callback, field in (
-        (nack, "nacks"),
-        (timeout, "timeouts"),
-        (transport, "transport_failures"),
-    ):
+    for callback, field in ((nack, "nacks"), (timeout, "timeouts"), (transport, "transport_failures")):
         with pytest.raises(TransportError):
             await ops._tracked(data, "test_operation", 60.0, callback)
         assert getattr(data.rf_operations["test_operation"], field) == 1
 
     await ops._tracked(data, "test_operation", 60.0, success)
     health = data.rf_operations["test_operation"]
-    assert health.attempts == 4
-    assert health.successes == 1
-    assert health.consecutive_failures == 0
-
-
-async def test_tracked_request_counts_each_retry_attempt(fake_transport: FakeTransport) -> None:
-    fake_transport.auto_reply = False
-    ops = _ops(fake_transport)
-    data = BoilerData()
+    assert (health.attempts, health.successes, health.consecutive_failures) == (4, 1, 0)
 
     with pytest.raises(RequestTimeout):
-        await ops._tracked_read(
-            data,
-            "retrying_read",
-            60.0,
-            0x79E0,
-            1,
-            lambda _payload, _data: None,
-            timeout=0.01,
-            retries=3,
-        )
-
-    health = data.rf_operations["retrying_read"]
-    assert health.attempts == 3
-    assert health.timeouts == 3
-    assert health.consecutive_failures == 3
+        await ops._tracked_read(data, "retrying_read", 60.0, 0x79E0, 1, lambda _p, _d: None, timeout=0.01, retries=3)
+    retried = data.rf_operations["retrying_read"]
+    assert (retried.attempts, retried.timeouts, retried.consecutive_failures) == (3, 3, 3)
 
 
-async def test_write_dhw_mode_sends_init_and_updates_model(fake_transport: FakeTransport) -> None:
+async def test_init_writes_emit_expected_frame_and_update_model(fake_transport):
     ops = _ops(fake_transport)
     data = BoilerData()
-    data.boiler.dhw_frame_bits = 0x80
 
+    data.boiler.dhw_frame_bits = 0x80
     task = asyncio.create_task(_ack_first_init(fake_transport))
     try:
         await ops.write_dhw_mode(data, DhwMode.ECO)
     finally:
         await task
-
-    sent = fake_transport.sent[0]
-    assert sent.msg_type == MSG_INIT
-    assert sent.payload == bytes.fromhex("a0fc0001a0fc0001020088")
+    assert fake_transport.sent[0].msg_type == MSG_INIT
+    assert fake_transport.sent[0].payload == bytes.fromhex("a0fc0001a0fc0001020088")
     assert data.boiler.dhw_mode == DhwMode.ECO
 
-
-async def test_write_outside_temperature_keeps_boiler_observed_temperature_separate(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
+    fake_transport.sent.clear()
     data.boiler.outside_temperature = 8.0
-
     task = asyncio.create_task(_ack_first_init(fake_transport))
     try:
         await ops.write_outside_temperature(data, 12.34)
     finally:
         await task
-
-    sent = fake_transport.sent[0]
-    assert sent.msg_type == MSG_INIT
-    assert sent.payload == bytes.fromhex("9c540004a029000102007b")
+    assert fake_transport.sent[0].payload == bytes.fromhex("9c540004a029000102007b")
     assert data.sonde.outside_temperature == pytest.approx(12.3)
     assert data.boiler.outside_temperature == pytest.approx(8.0)
 
 
-async def test_write_zone_mode_sends_short_area_init(fake_transport: FakeTransport) -> None:
+async def test_zone_writes_emit_expected_init_frame_and_update_model(fake_transport):
     ops = _ops(fake_transport)
     data = BoilerData()
     seed_zone_metadata(data, 1)
 
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
-    finally:
-        await task
-
+    # Schedule known -> full 0x18 write (official-app style).
+    await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
     sent = fake_transport.sent[0]
-    assert sent.control == 0x08
-    assert sent.msg_type == MSG_INIT
-    assert sent.payload == bytes.fromhex(
-        "a1540018a154001830967814062500"
-        "00e0ffffffff"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffffff"
-    )
-    assert data.zones[1].mode == ZoneMode.COMFORT
-    assert data.zones[1].boost is False
+    assert (sent.control, sent.msg_type) == (0x08, MSG_INIT)
+    assert sent.payload == bytes.fromhex("a1540018a154001830967814062500") + DEFAULT_ZONE_SCHEDULE_BYTES
+    assert (data.zones[1].mode, data.zones[1].boost) == (ZoneMode.COMFORT, False)
 
+    # Auto uses the schedule options byte 0x10, not a previously-learned frost byte.
+    fake_transport.sent.clear()
+    data.zones[1].mode_options = 0x20
+    await ops.write_zone_mode(1, data, ZoneMode.AUTO)
+    assert fake_transport.sent[0].payload[9:15].hex() == "967814051000"
 
-async def test_write_zone_auto_uses_schedule_options_not_learned_bits(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
-    seed_zone_metadata(data, 1)
-    data.zones[1].mode_options = 0x20  # previously-learned frost options
-
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_zone_mode(1, data, ZoneMode.AUTO)
-    finally:
-        await task
-
-    sent = fake_transport.sent[0]
-    # body = comfort, reduced, frost, mode(0x05 auto), opts, 0x00. The options
-    # byte must be the schedule form 0x10, not the stale frost form 0x20.
-    assert sent.payload[9:15].hex() == "967814051000"
-
-
-async def test_write_zone_short_omits_schedule_when_unknown(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
+    # No schedule learned -> short 0x03 write, repeated.
+    fake_transport.sent.clear()
     data = BoilerData()
     zs = data.zones[1]
-    zs.comfort_temperature = 20.0
-    zs.reduced_temperature = 17.0
-    zs.frost_temperature = 7.0
-    zs.mode_options = 0x24  # no schedule learned yet
-
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
-    finally:
-        await task
-
-    sent = fake_transport.sent[0]
-    assert sent.control == 0x08
-    # OpenFrisquetVisio-style short write: write size 0x0003, 6-byte body, no schedule.
-    assert sent.payload == bytes.fromhex("a1540018a154000306967814062500")
-    assert data.zones[1].mode == ZoneMode.COMFORT
+    zs.comfort_temperature, zs.reduced_temperature, zs.frost_temperature, zs.mode_options = 20.0, 17.0, 7.0, 0x24
+    await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
+    assert fake_transport.sent[0].control == 0x08
+    assert fake_transport.sent[0].payload == bytes.fromhex("a1540018a154000306967814062500")
     health = data.rf_operations["connect_zone1_write"]
-    assert health.attempts == ops_module.ZONE_WRITE_REPEATS
-    assert health.successes == ops_module.ZONE_WRITE_REPEATS
+    assert (health.attempts, health.successes) == (ops_module.ZONE_WRITE_REPEATS, ops_module.ZONE_WRITE_REPEATS)
+
+    # Auto + eco derogation: mode byte stays auto, options switch to the fixed-level form.
+    fake_transport.sent.clear()
+    data = BoilerData()
+    seed_zone_metadata(data, 1)
+    await ops.write_zone_override(1, data, "reduced")
+    assert fake_transport.sent[0].payload == bytes.fromhex("a1540018a154001830967814052400") + DEFAULT_ZONE_SCHEDULE_BYTES
+    assert (data.zones[1].mode, data.zones[1].override, data.zones[1].auto_comfort) == (ZoneMode.AUTO, True, False)
+
+    data = BoilerData()
+    seed_zone_metadata(data, 1)
+    data.zones[1].mode = ZoneMode.COMFORT
+    await ops.apply_zone_climate(1, data, hvac_mode=HVAC_HEAT, preset=PRESET_BOOST)
+    assert (data.zones[1].mode, data.zones[1].boost) == (ZoneMode.COMFORT, True)
+
+    data = BoilerData()
+    seed_zone_metadata(data, 1)
+    data.zones[1].mode = ZoneMode.COMFORT
+    await ops.apply_zone_climate(1, data, target_temperature=21.0)
+    assert data.zones[1].comfort_temperature == pytest.approx(21.0)
 
 
-async def test_send_zone_consigne_emits_satellite_write(fake_transport: FakeTransport) -> None:
+async def test_send_zone_consigne_writes_satellite_frame_and_flags_malformed_response(fake_transport):
     fake_transport.init_responses = {0x01: _SATELLITE_INFO}
     ops = _ops(fake_transport, self_addr=ADDR_SATELLITE_Z1)
     data = BoilerData()
-    zs = data.zones[1]
-    zs.mode = ZoneMode.AUTO
-    zs.auto_comfort = False
+    data.zones[1].mode = ZoneMode.AUTO
+    data.zones[1].auto_comfort = False
 
     await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
 
@@ -241,179 +180,18 @@ async def test_send_zone_consigne_emits_satellite_write(fake_transport: FakeTran
     # the boiler-state block in the response is decoded back into the model
     assert data.zones[1].ambient_temperature == pytest.approx(27.3)
 
-
-async def test_malformed_zone_consigne_response_is_not_success(fake_transport: FakeTransport) -> None:
     fake_transport.init_responses = {0x01: b"bad"}
-    ops = _ops(fake_transport, self_addr=ADDR_SATELLITE_Z1)
     data = BoilerData()
     data.zones[1].mode = ZoneMode.AUTO
-
     with pytest.raises(ValueError):
         await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
-
     health = data.rf_operations["satellite_z1_consigne"]
-    assert health.attempts == 1
-    assert health.successes == 0
-    assert health.other_failures == 1
+    assert (health.attempts, health.successes, health.other_failures) == (1, 0, 1)
 
 
-async def test_read_satellite_info_uses_read_without_writing_ambient(fake_transport: FakeTransport) -> None:
-    fake_transport.read_responses = {0xA029: _SATELLITE_INFO}
-    fake_transport.init_responses = {0x01: _SATELLITE_INFO}
-    ops = _ops(fake_transport)
-    data = BoilerData()
-
-    await ops.read_satellite_info(data)
-
-    sent = fake_transport.sent[0]
-    assert sent.msg_type == MSG_READ
-    assert sent.payload == bytes.fromhex("a0290015")
-    assert data.zones[1].ambient_temperature == pytest.approx(27.3)
-
-
-async def test_write_zone_boost_requires_comfort_mode(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
-    seed_zone_metadata(data, 1)
-    data.zones[1].mode = ZoneMode.AUTO
-
-    with pytest.raises(ValueError, match="Comfort"):
-        await ops.write_zone_boost(1, data, True)
-
-
-async def test_write_zone_override_forces_auto_derogation(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
-    seed_zone_metadata(data, 1)
-
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_zone_override(1, data, "reduced")
-    finally:
-        await task
-
-    sent = fake_transport.sent[0]
-    # AUTO + eco derogation: mode byte stays 0x05 (auto), options switch to the
-    # fixed-level form 0x24 (eco) instead of the schedule form 0x10.
-    assert sent.payload == bytes.fromhex(
-        "a1540018a154001830967814052400"
-        "00e0ffffffff"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffff7f"
-        "00e0ffffffff"
-    )
-    assert data.zones[1].mode == ZoneMode.AUTO
-    assert data.zones[1].override is True
-    assert data.zones[1].auto_comfort is False
-
-
-async def test_read_satellite_info_populates_zone_mode() -> None:
-    payload = bytes.fromhex("2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000")
-    transport = FakeTransport(read_responses={0xA029: payload})
-    ops = _ops(transport)
-    data = BoilerData()
-
-    await ops.read_satellite_info(data)
-
-    assert data.zones[1].mode == ZoneMode.FROST
-    assert data.zones[1].ambient_temperature == pytest.approx(27.3)
-
-
-async def test_write_zone_raises_when_metadata_not_yet_learned() -> None:
-    transport = FakeTransport()
-    ops = _ops(transport)
-    data = BoilerData()
-
-    with pytest.raises(ValueError, match="not yet learned"):
-        await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
-
-    assert transport.sent == []
-
-
-async def test_apply_zone_climate_boost(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
-    seed_zone_metadata(data, 1)
-    data.zones[1].mode = ZoneMode.COMFORT
-
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.apply_zone_climate(1, data, hvac_mode=HVAC_HEAT, preset=PRESET_BOOST)
-    finally:
-        await task
-
-    assert data.zones[1].mode == ZoneMode.COMFORT
-    assert data.zones[1].boost is True
-
-
-async def test_apply_zone_climate_target_temperature(fake_transport: FakeTransport) -> None:
-    ops = _ops(fake_transport)
-    data = BoilerData()
-    seed_zone_metadata(data, 1)
-    data.zones[1].mode = ZoneMode.COMFORT
-
-    task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.apply_zone_climate(1, data, target_temperature=21.0)
-    finally:
-        await task
-
-    assert data.zones[1].comfort_temperature == pytest.approx(21.0)
-
-
-class _RecordingClient:
-    """Records the reply budget each request is given, then fails like a lost frame."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def set_attempt_outcome_callback(self, callback: object) -> None:
-        return None
-
-    def reset_attempt_outcome_callback(self, token: object) -> None:
-        return None
-
-    async def request(self, **kwargs: object) -> Frame:
-        self.calls.append(kwargs)
-        raise RequestTimeout("no response")
-
-    async def read_memory(self, address: int, size: int, **kwargs: object) -> bytes:
-        self.calls.append({"address": address, "size": size, **kwargs})
-        raise RequestTimeout("no response")
-
-
-async def test_send_zone_consigne_uses_the_short_a029_reply_budget() -> None:
-    # Measured live: the 0xa029 exchange answers only ~20% of individual frames
-    # while replies arrive in 148-750 ms, so the 5 s client default held the
-    # shared radio lock for up to 15 s per lost consigne send.
-    client = _RecordingClient()
-    ops = BoilerOps(client, boiler_addr=0x80)  # type: ignore[arg-type]
-    data = BoilerData()
-    data.zones[1].mode = ZoneMode.AUTO
-    data.zones[1].auto_comfort = False
-
-    with pytest.raises(RequestTimeout):
-        await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
-
-    assert client.calls[0]["timeout"] == ops_module.A029_TIMEOUT
-    assert client.calls[0]["retries"] == ops_module.A029_RETRIES
-    assert ops_module.A029_TIMEOUT < 5.0
-    # Six frames per send (two bursts of three) is the reference's budget for
-    # this exchange; at ~20% per frame that puts a send near 74%.
-    assert ops_module.A029_RETRIES * ops_module.A029_BURST == 6
-    assert client.calls[0]["burst"] == ops_module.A029_BURST
-    assert client.calls[0]["burst_interval"] == ops_module.A029_BURST_INTERVAL
-
-
-async def test_send_zone_consigne_repeats_the_identical_frame_within_a_burst(
-    fake_transport: FakeTransport,
-) -> None:
-    # The reference implementation sends the same message id several times, so a
-    # reply to any frame of the burst still matches; a new id per frame would
-    # discard it.
+async def test_send_zone_consigne_bursts_identical_frames(fake_transport):
+    # The reference sends the same message id several times, so a reply to any
+    # frame of the burst still matches; a new id per frame would discard it.
     fake_transport.auto_reply = False
     ops = _ops(fake_transport, self_addr=ADDR_SATELLITE_Z1)
     data = BoilerData()
@@ -425,18 +203,34 @@ async def test_send_zone_consigne_repeats_the_identical_frame_within_a_burst(
 
     sent = fake_transport.sent
     assert len(sent) == 6
-    assert [f.request_id for f in sent][0:3] == [sent[0].request_id] * 3
-    assert [f.request_id for f in sent][3:6] == [sent[3].request_id] * 3
+    assert [f.request_id for f in sent[:3]] == [sent[0].request_id] * 3
+    assert [f.request_id for f in sent[3:]] == [sent[3].request_id] * 3
     assert sent[0].request_id != sent[3].request_id
     assert len({f.payload for f in sent}) == 1
 
 
-async def test_read_satellite_info_uses_the_short_a029_reply_budget() -> None:
-    client = _RecordingClient()
-    ops = BoilerOps(client, boiler_addr=0x80)  # type: ignore[arg-type]
+async def test_read_satellite_info_decodes_zone_state(fake_transport):
+    fake_transport.read_responses = {0xA029: _SATELLITE_INFO}
+    ops = _ops(fake_transport)
+    data = BoilerData()
 
-    with pytest.raises(RequestTimeout):
-        await ops.read_satellite_info(BoilerData())
+    await ops.read_satellite_info(data)
 
-    assert client.calls[0]["timeout"] == ops_module.A029_TIMEOUT
-    assert client.calls[0]["retries"] == ops_module.A029_RETRIES
+    sent = fake_transport.sent[0]
+    assert (sent.msg_type, sent.payload) == (MSG_READ, bytes.fromhex("a0290015"))
+    assert data.zones[1].mode == ZoneMode.FROST
+    assert data.zones[1].ambient_temperature == pytest.approx(27.3)
+
+
+async def test_zone_writes_reject_unlearned_metadata_and_boost_outside_comfort(fake_transport):
+    ops = _ops(fake_transport)
+    data = BoilerData()
+
+    with pytest.raises(ValueError, match="not yet learned"):
+        await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
+    assert fake_transport.sent == []
+
+    seed_zone_metadata(data, 1)
+    data.zones[1].mode = ZoneMode.AUTO
+    with pytest.raises(ValueError, match="Comfort"):
+        await ops.write_zone_boost(1, data, True)

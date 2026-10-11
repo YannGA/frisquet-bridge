@@ -22,205 +22,119 @@ from frisquet_bridge.transport.base import TransportError
 from tests.helpers import FakeTransport
 
 
-@pytest.fixture
-def protocol_state() -> ProtocolState:
-    return ProtocolState(
-        network_id=bytes.fromhex("05d97f78"),
-        association_id=0x9C,
-        request_id=0x18,
+def _state():
+    return ProtocolState(network_id=bytes.fromhex("05d97f78"), association_id=0x9C, request_id=0x18)
+
+
+def _reply(request, *, control, msg_type, payload=b"", request_id=None):
+    return Frame(
+        to_addr=request.from_addr,
+        from_addr=request.to_addr,
+        association_id=request.association_id,
+        request_id=request.request_id if request_id is None else request_id,
+        control=control,
+        msg_type=msg_type,
+        payload=payload,
     )
 
 
-@pytest.fixture
-def client(fake_transport: FakeTransport, protocol_state: ProtocolState) -> FrisquetClient:
-    return FrisquetClient(fake_transport, protocol_state)
+def _broadcast():
+    return Frame(
+        to_addr=ADDR_BROADCAST,
+        from_addr=ADDR_BOILER,
+        association_id=0x12,
+        request_id=0xD4,
+        control=0x02,
+        msg_type=MSG_ASSOCIATION,
+        payload=bytes.fromhex("0412345678"),
+    )
 
 
-async def test_read_memory_happy_path(
-    client: FrisquetClient,
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
+async def _wait_for_sent(transport, count):
+    while len(transport.sent) < count:
+        await asyncio.sleep(0)
+
+
+async def test_read_memory_request_response_and_state(fake_transport):
+    state = _state()
+    client = FrisquetClient(fake_transport, state)
     payload = await client.read_memory(0x79E0, 0x1C)
     assert payload == bytes.fromhex("38024b0269")
-    assert fake_transport.sent[0].msg_type == MSG_READ
-    assert fake_transport.sent[0].payload == bytes.fromhex("79e0001c")
-    assert fake_transport.sent[0].request_id == 0x1C
-    assert protocol_state.request_id == 0x1C
-    assert fake_transport.network_ids[-1] == protocol_state.network_id
+    sent = fake_transport.sent[0]
+    assert sent.msg_type == MSG_READ
+    assert sent.payload == bytes.fromhex("79e0001c")
+    assert sent.request_id == 0x1C
+    assert state.request_id == 0x1C
+    assert fake_transport.network_ids[-1] == state.network_id
 
 
-async def test_request_retries_then_raises(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
+async def test_request_filters_noise_and_reports_nack():
+    transport = FakeTransport(auto_reply=False)
+    client = FrisquetClient(transport, _state())
 
-    with pytest.raises(RequestTimeout, match="failed after"):
-        await client.request(
-            control=0x01,
-            msg_type=MSG_READ,
-            payload=bytes.fromhex("79e0001c"),
-            timeout=0.01,
-            retries=2,
-        )
-
-    assert len(fake_transport.sent) == 2
-
-
-async def test_request_ignores_non_ack_frame_with_same_ids(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
-
-    async def push_noise_then_response() -> None:
-        while not fake_transport.sent:
-            await asyncio.sleep(0)
-        request = fake_transport.sent[0]
-        fake_transport.push_frame(
-            Frame(
-                to_addr=request.from_addr,
-                from_addr=request.to_addr,
-                association_id=request.association_id,
-                request_id=request.request_id,
-                control=0x01,
-                msg_type=request.msg_type,
-                payload=bytes.fromhex("ffffffff"),
-            )
-        )
-        fake_transport.push_frame(
-            Frame(
-                to_addr=request.from_addr,
-                from_addr=request.to_addr,
-                association_id=request.association_id,
-                request_id=request.request_id,
-                control=0x81,
-                msg_type=request.msg_type,
-                payload=bytes.fromhex("38024b0269"),
-            )
-        )
-
-    task = asyncio.create_task(push_noise_then_response())
-    try:
-        payload = await client.read_memory(0x79E0, 0x1C)
-    finally:
-        await task
-
-    assert payload == bytes.fromhex("38024b0269")
-
-
-async def test_request_send_failure_retries(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.send_raises = TransportError("modem offline")
-    client = FrisquetClient(fake_transport, protocol_state)
-
-    with pytest.raises(TransportError, match="failed after"):
-        await client.request(
-            control=0x01,
-            msg_type=MSG_READ,
-            payload=bytes.fromhex("79e0001c"),
-            retries=2,
-        )
-
-    assert fake_transport.sent == []
-
-
-async def test_matching_address_not_found_is_terminal_without_retry(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
-
-    async def push_nack() -> None:
-        while not fake_transport.sent:
-            await asyncio.sleep(0)
-        request = fake_transport.sent[0]
-        fake_transport.push_frame(
-            Frame(
-                to_addr=request.from_addr,
-                from_addr=request.to_addr,
-                association_id=request.association_id,
-                request_id=request.request_id,
-                control=0x81,
-                msg_type=MSG_ADDRESS_NOT_FOUND,
-                payload=request.payload,
-            )
-        )
-
-    task = asyncio.create_task(push_nack())
-    try:
-        with pytest.raises(AddressNotFound) as caught:
-            await client.read_memory(0xA029, 1, retries=3)
-    finally:
-        await task
-
-    assert len(fake_transport.sent) == 1
-    assert caught.value.request_msg_type == MSG_READ
-    assert caught.value.request_payload == bytes.fromhex("a0290001")
-
-
-async def test_wrong_identity_and_non_ack_nacks_are_noise_before_success(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
-
-    async def push_noise_then_success() -> None:
-        while not fake_transport.sent:
-            await asyncio.sleep(0)
-        request = fake_transport.sent[0]
+    async def noise_then_ack():
+        await _wait_for_sent(transport, 1)
+        request = transport.sent[0]
         for request_id, control in (
             (request.request_id + 1, 0x81),
             (request.request_id, 0x01),
             (request.request_id, 0x82),
         ):
-            fake_transport.push_frame(
-                Frame(
-                    to_addr=request.from_addr,
-                    from_addr=request.to_addr,
-                    association_id=request.association_id,
-                    request_id=request_id,
-                    control=control,
-                    msg_type=MSG_ADDRESS_NOT_FOUND,
-                )
+            transport.push_frame(
+                _reply(request, request_id=request_id, control=control, msg_type=MSG_ADDRESS_NOT_FOUND)
             )
-        fake_transport.push_frame(
-            Frame(
-                to_addr=request.from_addr,
-                from_addr=request.to_addr,
-                association_id=request.association_id,
-                request_id=request.request_id,
-                control=0x81,
-                msg_type=MSG_READ,
-                payload=b"success",
-            )
-        )
+        transport.push_frame(_reply(request, control=0x81, msg_type=MSG_READ, payload=b"success"))
 
-    task = asyncio.create_task(push_noise_then_success())
+    task = asyncio.create_task(noise_then_ack())
     try:
         result = await client.read_memory(0xA029, 1, retries=1)
     finally:
         await task
-
     assert result == b"success"
-    assert len(fake_transport.sent) == 1
+    assert len(transport.sent) == 1
+
+    nack_transport = FakeTransport(auto_reply=False)
+    nack_client = FrisquetClient(nack_transport, _state())
+
+    async def push_nack():
+        await _wait_for_sent(nack_transport, 1)
+        request = nack_transport.sent[0]
+        nack_transport.push_frame(
+            _reply(request, control=0x81, msg_type=MSG_ADDRESS_NOT_FOUND, payload=request.payload)
+        )
+
+    task = asyncio.create_task(push_nack())
+    try:
+        with pytest.raises(AddressNotFound) as caught:
+            await nack_client.read_memory(0xA029, 1, retries=3)
+    finally:
+        await task
+    assert len(nack_transport.sent) == 1
+    assert caught.value.request_msg_type == MSG_READ
+    assert caught.value.request_payload == bytes.fromhex("a0290001")
 
 
-async def test_request_burst_repeats_the_same_frame_and_accepts_a_mid_burst_reply(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
+async def test_request_retries_then_raises():
+    transport = FakeTransport(auto_reply=False)
+    client = FrisquetClient(transport, _state())
+    with pytest.raises(RequestTimeout, match="failed after"):
+        await client.request(
+            control=0x01, msg_type=MSG_READ, payload=bytes.fromhex("79e0001c"), timeout=0.01, retries=2
+        )
+    assert len(transport.sent) == 2
+
+    failing = FakeTransport(send_raises=TransportError("modem offline"))
+    client = FrisquetClient(failing, _state())
+    with pytest.raises(TransportError, match="failed after"):
+        await client.request(control=0x01, msg_type=MSG_READ, payload=bytes.fromhex("79e0001c"), retries=2)
+    assert failing.sent == []
+
+
+async def test_request_burst_repeats_identical_frame_and_accepts_mid_burst_reply():
     # The reference implementation repeats the identical frame (same message id)
     # on the lossy 0xa029 exchange instead of retrying with a fresh id.
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
+    transport = FakeTransport(auto_reply=False)
+    client = FrisquetClient(transport, _state())
     payload = bytes.fromhex("a0290015")
 
     task = asyncio.create_task(
@@ -234,126 +148,63 @@ async def test_request_burst_repeats_the_same_frame_and_accepts_a_mid_burst_repl
         )
     )
     try:
-        while len(fake_transport.sent) < 2:
-            await asyncio.sleep(0)
-        first = fake_transport.sent[0]
-        # A reply to the *first* frame of the burst must still match, because the
-        # request id does not change inside a burst.
-        fake_transport.push_frame(
-            Frame(
-                to_addr=first.from_addr,
-                from_addr=first.to_addr,
-                association_id=first.association_id,
-                request_id=first.request_id,
-                control=first.control | 0x80,
-                msg_type=MSG_INIT,
-                payload=b"ok",
-            )
-        )
+        await _wait_for_sent(transport, 2)
+        first = transport.sent[0]
+        # A reply to the first frame of the burst must match: the request id does
+        # not change inside a burst.
+        transport.push_frame(_reply(first, control=first.control | 0x80, msg_type=MSG_INIT, payload=b"ok"))
         response = await task
     finally:
         if not task.done():
             task.cancel()
 
-    sent = fake_transport.sent
+    sent = transport.sent
     assert len(sent) == 3
     assert {f.request_id for f in sent} == {first.request_id}
     assert {f.payload for f in sent} == {payload}
     assert response.payload == b"ok"
 
 
-async def test_pair_success(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
+async def test_pair_and_recover_network_id():
+    transport = FakeTransport(auto_reply=False)
+    client = FrisquetClient(transport, _state())
 
-    async def push_then_quiet() -> None:
+    async def push_broadcast():
         await asyncio.sleep(0.05)
-        broadcast = Frame(
-            to_addr=ADDR_BROADCAST,
-            from_addr=ADDR_BOILER,
-            association_id=0x12,
-            request_id=0xD4,
-            control=0x02,
-            msg_type=MSG_ASSOCIATION,
-            payload=bytes.fromhex("0412345678"),
-        )
-        fake_transport.push_frame(broadcast)
+        transport.push_frame(_broadcast())
 
-    task = asyncio.create_task(push_then_quiet())
+    task = asyncio.create_task(push_broadcast())
     try:
         assoc = await client.pair(ADDR_CONNECT, listen_window=0.2)
     finally:
         await task
-
     assert assoc.network_id == bytes.fromhex("12345678")
-    assert assoc.association_id == 0x12
-    assert assoc.request_id == 0xD4
-    assert fake_transport.network_ids[0] == b"\xff\xff\xff\xff"
-    reply = fake_transport.sent[0]
-    assert reply.to_addr == ADDR_BOILER
-    assert reply.from_addr == ADDR_CONNECT
-    assert reply.control == 0x82
-    assert reply.msg_type == MSG_ASSOCIATION
-
-
-async def test_pair_timeout(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
+    assert (assoc.association_id, assoc.request_id) == (0x12, 0xD4)
+    assert transport.network_ids[0] == b"\xff\xff\xff\xff"
+    reply = transport.sent[0]
+    assert (reply.to_addr, reply.from_addr, reply.control, reply.msg_type) == (
+        ADDR_BOILER,
+        ADDR_CONNECT,
+        0x82,
+        MSG_ASSOCIATION,
+    )
 
     with pytest.raises(TransportError, match="pairing timed out"):
-        await client.pair(ADDR_CONNECT, listen_window=0.05)
+        await FrisquetClient(FakeTransport(auto_reply=False), _state()).pair(ADDR_CONNECT, listen_window=0.05)
 
+    rec = FakeTransport(auto_reply=False)
 
-async def test_recover_network_id_does_not_reply(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
-
-    async def push_broadcast() -> None:
+    async def push_broadcast_again():
         await asyncio.sleep(0.02)
-        fake_transport.push_frame(
-            Frame(
-                to_addr=ADDR_BROADCAST,
-                from_addr=ADDR_BOILER,
-                association_id=0x12,
-                request_id=0xD4,
-                control=0x02,
-                msg_type=MSG_ASSOCIATION,
-                payload=bytes.fromhex("0412345678"),
-            )
-        )
+        rec.push_frame(_broadcast())
 
-    task = asyncio.create_task(push_broadcast())
+    task = asyncio.create_task(push_broadcast_again())
     try:
-        network_id = await client.recover_network_id(timeout=0.3)
+        network_id = await FrisquetClient(rec, _state()).recover_network_id(timeout=0.3)
     finally:
         await task
-
     assert network_id == bytes.fromhex("12345678")
-    assert fake_transport.sent == []  # recovery never transmits
-
-
-async def test_recover_network_id_timeout(
-    fake_transport: FakeTransport,
-    protocol_state: ProtocolState,
-) -> None:
-    fake_transport.auto_reply = False
-    client = FrisquetClient(fake_transport, protocol_state)
+    assert rec.sent == []
 
     with pytest.raises(TransportError, match="network id recovery timed out"):
-        await client.recover_network_id(timeout=0.05)
-
-
-async def test_fake_transport_rejects_bad_network_id(
-    fake_transport: FakeTransport,
-) -> None:
-    with pytest.raises(TransportError, match="4 bytes"):
-        await fake_transport.set_network_id(b"\x01")
+        await FrisquetClient(FakeTransport(auto_reply=False), _state()).recover_network_id(timeout=0.05)

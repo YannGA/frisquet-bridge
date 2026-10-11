@@ -16,34 +16,28 @@ _SATELLITE_INFO = bytes.fromhex(
 )
 
 
-def _satellite(data: BoilerData, transport: FakeTransport) -> VirtualSatellite:
+def _satellite(data, transport, *, on_update=None):
     state = ProtocolState(network_id=bytes.fromhex("05d97f78"), association_id=0xC0, request_id=0x6C)
     client = FrisquetClient(transport, state, self_addr=ADDR_SATELLITE_Z1)
-    ops = BoilerOps(client, boiler_addr=0x80)
-    return VirtualSatellite(1, ops, data)
+    return VirtualSatellite(1, BoilerOps(client, boiler_addr=0x80), data, on_update=on_update)
 
 
-async def test_send_now_skips_when_ambient_unknown() -> None:
-    transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
-    data = BoilerData()
-    data.zones[1].mode = ZoneMode.AUTO  # ambient still unknown
-    satellite = _satellite(data, transport)
-
-    assert await satellite.send_now() is False
-    assert transport.sent == []
-
-
-async def test_send_now_emits_consigne_when_ready() -> None:
-    transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
+def _ready_zone():
     data = BoilerData()
     zs = data.zones[1]
-    zs.mode = ZoneMode.AUTO
-    zs.auto_comfort = False
-    zs.reduced_temperature = 19.0
-    zs.reported_ambient = 20.0
-    satellite = _satellite(data, transport)
+    zs.mode, zs.auto_comfort, zs.reported_ambient, zs.reduced_temperature = ZoneMode.AUTO, False, 20.0, 19.0
+    return data
 
-    assert await satellite.send_now() is True
+
+async def test_send_now_skips_unknown_ambient_sends_consigne_and_reports_failure():
+    data = BoilerData()
+    data.zones[1].mode = ZoneMode.AUTO  # ambient still unknown
+    transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
+    assert await _satellite(data, transport).send_now() is False
+    assert transport.sent == []
+
+    transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
+    assert await _satellite(_ready_zone(), transport).send_now() is True
     sent = transport.sent[0]
     assert sent.from_addr == ADDR_SATELLITE_Z1
     # read 0xa029/0x15, write 0xa02f/0x04, data len 8.
@@ -51,26 +45,14 @@ async def test_send_now_emits_consigne_when_ready() -> None:
     # ambient 20.0 and active setpoint 19.0 (reduced) encoded as temperature16.
     assert sent.payload[9:13].hex() == "00c800be"
 
-
-async def test_send_failure_publishes_updated_rf_health() -> None:
-    transport = FakeTransport(send_raises=TransportError("serial offline"))
-    data = BoilerData()
-    zs = data.zones[1]
-    zs.mode = ZoneMode.AUTO
-    zs.auto_comfort = False
-    zs.reduced_temperature = 19.0
-    zs.reported_ambient = 20.0
     updates = 0
 
-    async def on_update() -> None:
+    async def on_update():
         nonlocal updates
         updates += 1
 
-    state = ProtocolState(network_id=bytes.fromhex("05d97f78"), association_id=0xC0, request_id=0x6C)
-    client = FrisquetClient(transport, state, self_addr=ADDR_SATELLITE_Z1)
-    ops = BoilerOps(client, boiler_addr=0x80)
-    satellite = VirtualSatellite(1, ops, data, on_update=on_update)
-
-    assert await satellite.send_now() is False
+    fail_data = _ready_zone()
+    transport = FakeTransport(send_raises=TransportError("serial offline"))
+    assert await _satellite(fail_data, transport, on_update=on_update).send_now() is False
     assert updates == 1
-    assert data.rf_operations["satellite_z1_consigne"].transport_failures == A029_RETRIES
+    assert fail_data.rf_operations["satellite_z1_consigne"].transport_failures == A029_RETRIES
