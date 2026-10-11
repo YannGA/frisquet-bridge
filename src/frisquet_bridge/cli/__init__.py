@@ -1,4 +1,4 @@
-"""CLI entry points."""
+'CLI entry points.'
 
 from frisquet_bridge.cli.main import main
 

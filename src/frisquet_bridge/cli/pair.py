@@ -1,4 +1,4 @@
-"""Pair with the boiler and persist network/association ids."""
+'Pair with the boiler and persist network/association ids.'
 
 from __future__ import annotations
 
@@ -12,13 +12,7 @@ from frisquet_bridge.frame import ADDR_CONNECT, ADDR_SATELLITE_Z1, ADDR_SATELLIT
 from frisquet_bridge.logging import RawMessageRecorder
 from frisquet_bridge.transport.serial import SerialTransport
 
-PAIR_ROLES = {
-    "connect": ADDR_CONNECT,
-    "sonde": ADDR_SONDE,
-    "satellite_z1": ADDR_SATELLITE_Z1,
-    "satellite_z2": ADDR_SATELLITE_Z2,
-    "satellite_z3": ADDR_SATELLITE_Z3,
-}
+PAIR_ROLES = dict(connect=ADDR_CONNECT, sonde=ADDR_SONDE, satellite_z1=ADDR_SATELLITE_Z1, satellite_z2=ADDR_SATELLITE_Z2, satellite_z3=ADDR_SATELLITE_Z3)
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -30,18 +24,12 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    try:
-        asyncio.run(_pair(args.config, args.role, args.raw_recorder))
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    try: asyncio.run(_pair(args.config, args.role, args.raw_recorder))
+    except KeyboardInterrupt: print("\nStopped.")
     return 0
 
 
-async def _pair(
-    config_path: str, # config file to load and store the pairing into
-    role: str, # device identity to pair, a key of PAIR_ROLES
-    raw_recorder: RawMessageRecorder | None = None, # sink for raw serial lines
-) -> None:
+async def _pair(config_path: str, role: str, raw_recorder: RawMessageRecorder | None = None) -> None:
     cfg = load(config_path)
     state = ProtocolState(network_id=b"\xff\xff\xff\xff", association_id=0xFF)
     async with SerialTransport(cfg.serial.port, cfg.serial.speed, raw_recorder=raw_recorder) as transport:

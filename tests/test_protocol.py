@@ -1,4 +1,4 @@
-"""Tests for host <-> modem serial line protocol helpers."""
+'Tests for host <-> modem serial line protocol helpers.'
 
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ def test_crc8_and_format_cmd_round_trip():
 
 
 def test_verify_crc_rejects_malformed_lines():
-    for line in ("PING 1 ff", "PING", "", "PING 1 zz"):
-        assert verify_crc(line) is False
+    for line in ("PING 1 ff", "PING", "", "PING 1 zz"): assert verify_crc(line) is False
 
 
 def test_parse_rx():

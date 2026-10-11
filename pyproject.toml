@@ -33,7 +33,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 140
+# chkstyle (the fast.ai style checker) is the style authority here: it allows up
+# to 160 characters and aims for ~140. Ruff stays the 160 backstop rather than
+# fighting it at 140. Run it with `uvx --from fastaistyle chkstyle src tests`.
+line-length = 160
 target-version = "py311"
 src = ["src", "tests"]
 

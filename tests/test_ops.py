@@ -1,4 +1,4 @@
-"""Tests for high-level boiler write operations."""
+'Tests for high-level boiler write operations.'
 
 from __future__ import annotations
 
@@ -23,9 +23,7 @@ def _fast_zone_writes(monkeypatch):
     # tests don't sleep in real time.
     monkeypatch.setattr(ops_module, "ZONE_WRITE_INTERVAL", 0.0)
 
-_SATELLITE_INFO = bytes.fromhex(
-    "2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000"
-)
+_SATELLITE_INFO = bytes.fromhex('2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000')
 
 
 def _ops(fake_transport, *, self_addr=None):
@@ -35,20 +33,10 @@ def _ops(fake_transport, *, self_addr=None):
 
 
 async def _ack_first_init(fake_transport):
-    while not fake_transport.sent:
-        await asyncio.sleep(0)
+    while not fake_transport.sent: await asyncio.sleep(0)
     request = fake_transport.sent[0]
-    fake_transport.push_frame(
-        Frame(
-            to_addr=request.from_addr,
-            from_addr=request.to_addr,
-            association_id=request.association_id,
-            request_id=request.request_id,
-            control=request.control | 0x80,
-            msg_type=request.msg_type,
-            payload=b"",
-        )
-    )
+    fake_transport.push_frame(Frame(to_addr=request.from_addr, from_addr=request.to_addr, association_id=request.association_id,
+        request_id=request.request_id, control=request.control | 128, msg_type=request.msg_type, payload=b''))
 
 
 async def test_tracked_operation_classifies_outcomes_and_counts_retries(fake_transport):
@@ -60,21 +48,16 @@ async def test_tracked_operation_classifies_outcomes_and_counts_retries(fake_tra
         raise AddressNotFound(
             request_msg_type=MSG_READ,
             request_payload=b"",
-            response=Frame(0x40, 0x80, 1, 1, 0x81, 0x83, b""),
-        )
+            response=Frame(0x40, 0x80, 1, 1, 0x81, 0x83, b""))
 
-    async def timeout():
-        raise RequestTimeout("no response")
+    async def timeout(): raise RequestTimeout("no response")
 
-    async def transport():
-        raise TransportError("serial offline")
+    async def transport(): raise TransportError("serial offline")
 
-    async def success():
-        return None
+    async def success(): return None
 
     for callback, field in ((nack, "nacks"), (timeout, "timeouts"), (transport, "transport_failures")):
-        with pytest.raises(TransportError):
-            await ops._tracked(data, "test_operation", 60.0, callback)
+        with pytest.raises(TransportError): await ops._tracked(data, "test_operation", 60.0, callback)
         assert getattr(data.rf_operations["test_operation"], field) == 1
 
     await ops._tracked(data, "test_operation", 60.0, success)
@@ -93,10 +76,8 @@ async def test_init_writes_emit_expected_frame_and_update_model(fake_transport):
 
     data.boiler.dhw_frame_bits = 0x80
     task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_dhw_mode(data, DhwMode.ECO)
-    finally:
-        await task
+    try: await ops.write_dhw_mode(data, DhwMode.ECO)
+    finally: await task
     assert fake_transport.sent[0].msg_type == MSG_INIT
     assert fake_transport.sent[0].payload == bytes.fromhex("a0fc0001a0fc0001020088")
     assert data.boiler.dhw_mode == DhwMode.ECO
@@ -104,10 +85,8 @@ async def test_init_writes_emit_expected_frame_and_update_model(fake_transport):
     fake_transport.sent.clear()
     data.boiler.outside_temperature = 8.0
     task = asyncio.create_task(_ack_first_init(fake_transport))
-    try:
-        await ops.write_outside_temperature(data, 12.34)
-    finally:
-        await task
+    try: await ops.write_outside_temperature(data, 12.34)
+    finally: await task
     assert fake_transport.sent[0].payload == bytes.fromhex("9c540004a029000102007b")
     assert data.sonde.outside_temperature == pytest.approx(12.3)
     assert data.boiler.outside_temperature == pytest.approx(8.0)
@@ -194,8 +173,7 @@ async def test_send_zone_consigne_writes_satellite_frame_and_flags_malformed_res
     fake_transport.init_responses = {0x01: b"bad"}
     data = BoilerData()
     data.zones[1].mode = ZoneMode.AUTO
-    with pytest.raises(ValueError):
-        await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
+    with pytest.raises(ValueError): await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0)
     health = data.rf_operations["satellite_z1_consigne"]
     assert (health.attempts, health.successes, health.other_failures) == (1, 0, 1)
 
@@ -209,8 +187,7 @@ async def test_send_zone_consigne_bursts_identical_frames(fake_transport):
     data.zones[1].mode = ZoneMode.AUTO
     data.zones[1].auto_comfort = False
 
-    with pytest.raises(RequestTimeout):
-        await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0, timeout=0.02, retries=2, burst=3)
+    with pytest.raises(RequestTimeout): await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0, timeout=0.02, retries=2, burst=3)
 
     sent = fake_transport.sent
     assert len(sent) == 6
@@ -237,11 +214,9 @@ async def test_zone_writes_reject_unlearned_metadata_and_boost_outside_comfort(f
     ops = _ops(fake_transport)
     data = BoilerData()
 
-    with pytest.raises(ValueError, match="not yet learned"):
-        await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
+    with pytest.raises(ValueError, match="not yet learned"): await ops.write_zone_mode(1, data, ZoneMode.COMFORT)
     assert fake_transport.sent == []
 
     seed_zone_metadata(data, 1)
     data.zones[1].mode = ZoneMode.AUTO
-    with pytest.raises(ValueError, match="Comfort"):
-        await ops.write_zone_boost(1, data, True)
+    with pytest.raises(ValueError, match="Comfort"): await ops.write_zone_boost(1, data, True)

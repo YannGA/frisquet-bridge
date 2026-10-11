@@ -11,7 +11,6 @@ HA climate entity.
 from __future__ import annotations
 
 import asyncio, contextlib
-from collections.abc import Awaitable, Callable
 
 import structlog
 
@@ -19,6 +18,7 @@ from frisquet_bridge.boiler_profile import central_boiler_consigne, simple_consi
 from frisquet_bridge.climate import zone_target_temperature
 from frisquet_bridge.connect.ops import BoilerOps
 from frisquet_bridge.model import BoilerData
+from frisquet_bridge.types import UpdateNotify
 
 log = structlog.get_logger(__name__)
 
@@ -32,18 +32,18 @@ _CONSIGNE_BY_PROFILE = {"central_boiler": central_boiler_consigne, "simple_satel
 
 
 class VirtualSatellite:
-    """Periodically reports a zone's ambient/setpoint/mode to the boiler."""
+    "Periodically reports a zone's ambient/setpoint/mode to the boiler."
 
     def __init__(
         self,
-        zone: int, # zone number this satellite owns
-        ops: BoilerOps, # ops used to send the consigne
-        data: BoilerData, # shared data model
+        zone: int,
+        ops: BoilerOps,
+        data: BoilerData,
         *,
-        interval: float = CONSIGNE_INTERVAL, # seconds between periodic sends
-        connect_compat: bool = False, # encode modes the way the official Connect app does
+        interval: float = CONSIGNE_INTERVAL,
+        connect_compat: bool = False,
         profile: str = "virtual_satellite", # consigne profile: virtual_satellite, central_boiler or simple_satellite
-        on_update: Callable[[], Awaitable[None]] | None = None, # callback invoked after each send attempt
+        on_update: UpdateNotify | None = None,
     ) -> None:
         self._zone = zone
         self._ops = ops
@@ -56,7 +56,7 @@ class VirtualSatellite:
         self._stop = asyncio.Event()
 
     def request_send(self) -> None:
-        """Ask the runner to send a consigne now (e.g. after an HA command)."""
+        'Ask the runner to send a consigne now (e.g. after an HA command).'
         self._wake.set()
 
     def stop(self) -> None:
@@ -67,11 +67,10 @@ class VirtualSatellite:
         while not self._stop.is_set():
             await self._send_once()
             self._wake.clear()
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
+            with contextlib.suppress(TimeoutError): await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
 
     async def send_now(self) -> bool:
-        """Send a single consigne immediately; returns True if it was sent."""
+        'Send a single consigne immediately; returns True if it was sent.'
         return await self._send_once()
 
     async def _send_once(self) -> bool:
@@ -85,27 +84,15 @@ class VirtualSatellite:
             ambient = consigne.ambient if consigne is not None else None
             setpoint = consigne.setpoint if consigne is not None else None
         if ambient is None or zs.mode is None or setpoint is None:
-            log.debug(
-                "virtual_satellite_skip",
-                zone=self._zone,
-                profile=self._profile,
-                ambient=ambient,
-                setpoint=setpoint,
-                mode=zs.mode.value if zs.mode is not None else None,
-            )
+            log.debug('virtual_satellite_skip', zone=self._zone, profile=self._profile, ambient=ambient, setpoint=setpoint,
+                mode=zs.mode.value if zs.mode is not None else None)
             return False
         try:
-            await self._ops.send_zone_consigne(
-                self._zone,
-                self._data,
-                ambient=ambient,
-                setpoint=setpoint,
-                connect_compat=self._connect_compat,
-            )
+            await self._ops.send_zone_consigne(self._zone, self._data, ambient=ambient, setpoint=setpoint,
+                connect_compat=self._connect_compat)
             sent = True
         except Exception:
             log.exception("virtual_satellite_send_failed", zone=self._zone)
             sent = False
-        if self._on_update is not None:
-            await self._on_update()
+        if self._on_update is not None: await self._on_update()
         return sent

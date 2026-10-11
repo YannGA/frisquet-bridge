@@ -1,4 +1,4 @@
-"""MQTT/HA adapter package."""
+'MQTT/HA adapter package.'
 
 from frisquet_bridge.mqtt.adapter import MqttAdapter
 

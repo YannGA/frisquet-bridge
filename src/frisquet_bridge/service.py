@@ -1,12 +1,11 @@
-"""Main asyncio service wiring transport, ops, scheduler, and optional MQTT."""
+'Main asyncio service wiring transport, ops, scheduler, and optional MQTT.'
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
 
-import aiomqtt
-import structlog
+import aiomqtt, structlog
 
 from frisquet_bridge.config import BridgeConfig
 from frisquet_bridge.connect.client import FrisquetClient
@@ -28,53 +27,34 @@ _SATELLITE_ADDR = {1: ADDR_SATELLITE_Z1, 2: ADDR_SATELLITE_Z2, 3: ADDR_SATELLITE
 
 
 def _has_read_only_satellite_zone(
-    cfg: BridgeConfig, # bridge configuration
+    cfg: BridgeConfig,
     enabled_zones: tuple[int, ...], # zone numbers enabled in the configuration
 ) -> bool:
-    return any(
-        (zone_cfg := cfg.zone(zone_number)) is not None and zone_cfg.is_read_only_satellite
-        for zone_number in enabled_zones
-    )
+    return any((zone_cfg := cfg.zone(zone_number)) is not None and zone_cfg.is_read_only_satellite for zone_number in enabled_zones)
 
 
-def _configure_zone_sources(
-    cfg: BridgeConfig, # bridge configuration
-    data: BoilerData, # aggregate state whose zone sources are set
-) -> None:
+def _configure_zone_sources(cfg: BridgeConfig, data: BoilerData) -> None:
     for zone_number, zone_state in data.zones.items():
         zone_cfg = cfg.zone(zone_number)
-        if zone_cfg is not None and zone_cfg.uses_virtual_satellite:
-            zone_state.source = ZoneSource.VIRTUAL
-        elif zone_cfg is not None and zone_cfg.is_read_only_satellite:
-            zone_state.source = ZoneSource.SATELLITE
-        elif cfg.connect_reads_enabled:
-            zone_state.source = ZoneSource.CONNECT
+        if zone_cfg is not None and zone_cfg.uses_virtual_satellite: zone_state.source = ZoneSource.VIRTUAL
+        elif zone_cfg is not None and zone_cfg.is_read_only_satellite: zone_state.source = ZoneSource.SATELLITE
+        elif cfg.connect_reads_enabled: zone_state.source = ZoneSource.CONNECT
 
 
-def _configure_rf_diagnostics(
-    cfg: BridgeConfig, # bridge configuration
-    data: BoilerData, # aggregate state to register RF health entries on
-) -> None:
+def _configure_rf_diagnostics(cfg: BridgeConfig, data: BoilerData) -> None:
     if cfg.connect_reads_enabled:
-        for operation, freshness in (
-            ("connect_sensors", 90.0),
-            ("connect_consumption", 7200.0),
-            ("connect_daily_consumption", 7200.0),
-            ("connect_dhw_mode", 7200.0),
-            ("connect_clock", 7200.0),
-        ):
+        for operation, freshness in (("connect_sensors", 90.0), ("connect_consumption", 7200.0), ("connect_daily_consumption", 7200.0),
+            ("connect_dhw_mode", 7200.0), ("connect_clock", 7200.0)):
             data.rf_health(operation, freshness_seconds=freshness)
         enabled_zones = tuple(zone for zone in (1, 2, 3) if cfg.zone_enabled(zone))
-        if _has_read_only_satellite_zone(cfg, enabled_zones):
-            data.rf_health("connect_satellite_info", freshness_seconds=1200.0)
+        if _has_read_only_satellite_zone(cfg, enabled_zones): data.rf_health("connect_satellite_info", freshness_seconds=1200.0)
     if cfg.connect_writes_enabled:
         data.rf_health("connect_dhw_write", freshness_seconds=300.0)
         for zone in (1, 2, 3):
             zone_cfg = cfg.zone(zone)
             if zone_cfg is not None and zone_cfg.enabled and not zone_cfg.uses_virtual_satellite and not zone_cfg.is_read_only_satellite:
                 data.rf_health(f"connect_zone{zone}_write", freshness_seconds=1200.0, zone=zone)
-    if cfg.sonde is not None and cfg.sonde.enabled:
-        data.rf_health("sonde_outside_temperature", freshness_seconds=1200.0)
+    if cfg.sonde is not None and cfg.sonde.enabled: data.rf_health("sonde_outside_temperature", freshness_seconds=1200.0)
     for zone in (1, 2, 3):
         zone_cfg = cfg.zone(zone)
         if zone_cfg is not None and zone_cfg.uses_virtual_satellite:
@@ -82,12 +62,7 @@ def _configure_rf_diagnostics(
 
 
 class BridgeService:
-    def __init__(
-        self,
-        cfg: BridgeConfig, # bridge configuration
-        *,
-        raw_recorder: RawMessageRecorder | None = None, # optional raw-frame recorder
-    ) -> None:
+    def __init__(self, cfg: BridgeConfig, *, raw_recorder: RawMessageRecorder | None = None) -> None:
         self.cfg = cfg
         self.data = BoilerData()
         self._raw_recorder = raw_recorder
@@ -98,86 +73,55 @@ class BridgeService:
         self._stop.set()
 
     @staticmethod
-    async def _publish_diagnostics(
-        adapter: MqttAdapter, # adapter that republishes diagnostics
-        client: aiomqtt.Client, # connected MQTT client
-        *,
-        interval: float = 30.0, # seconds between republishes
-    ) -> None:
-        """Republish diagnostics so freshness can transition without RF traffic."""
+    async def _publish_diagnostics(adapter: MqttAdapter, client: aiomqtt.Client, *, interval: float = 30.0) -> None:
+        'Republish diagnostics so freshness can transition without RF traffic.'
         while True:
             await adapter.publish_state(client)
             await asyncio.sleep(interval)
 
     async def run(self) -> None:
-        log.info(
-            "service_starting",
-            serial_port=self.cfg.serial.port,
-            serial_speed=self.cfg.serial.speed,
-            mqtt_enabled=self.cfg.mqtt.enabled,
-            mqtt_host=self.cfg.mqtt.host if self.cfg.mqtt.enabled else None,
-            mqtt_port=self.cfg.mqtt.port if self.cfg.mqtt.enabled else None,
-            connect_mode=self.cfg.connect.mode if self.cfg.connect is not None else None,
-            connect_reads=self.cfg.connect_reads_enabled,
+        log.info("service_starting", serial_port=self.cfg.serial.port, serial_speed=self.cfg.serial.speed, mqtt_enabled=self.cfg.mqtt.enabled,
+            mqtt_host=self.cfg.mqtt.host if self.cfg.mqtt.enabled else None, mqtt_port=self.cfg.mqtt.port if self.cfg.mqtt.enabled else None,
+            connect_mode=self.cfg.connect.mode if self.cfg.connect is not None else None, connect_reads=self.cfg.connect_reads_enabled,
             sensor_poll_interval_seconds=self.cfg.sensor_poll_interval_seconds,
             connect_identity=self.cfg.connect is not None and self.cfg.connect.identity is not None,
-            sonde_enabled=self.cfg.sonde is not None and self.cfg.sonde.enabled,
-        )
+            sonde_enabled=self.cfg.sonde is not None and self.cfg.sonde.enabled)
         transport = SerialTransport(self.cfg.serial.port, self.cfg.serial.speed, raw_recorder=self._raw_recorder)
         # One lock shared by every client so connect/sonde/satellite exchanges
         # never transmit over each other on the half-duplex modem.
         request_lock = asyncio.Lock()
-        connect_ops: BoilerOps | None = None
-        sonde_ops: BoilerOps | None = None
+        connect_ops = None
+        sonde_ops = None
 
         if self.cfg.connect is not None and self.cfg.connect.identity is not None:
             state = ProtocolState(**self.cfg.protocol_state_kwargs("connect"))
-            client = FrisquetClient(
-                transport,
-                state,
-                boiler_addr=self.cfg.boiler_addr,
-                lock=request_lock,
-            )
+            client = FrisquetClient(transport, state, boiler_addr=self.cfg.boiler_addr, lock=request_lock)
             connect_ops = BoilerOps(client, boiler_addr=self.cfg.boiler_addr, memory_offset=self.cfg.memory_offset)
 
         if self.cfg.sonde is not None:
             sonde_state = ProtocolState(**self.cfg.protocol_state_kwargs("sonde"))
-            sonde_client = FrisquetClient(
-                transport,
-                sonde_state,
-                self_addr=ADDR_SONDE,
-                boiler_addr=self.cfg.boiler_addr,
-                lock=request_lock,
-            )
+            sonde_client = FrisquetClient(transport, sonde_state, self_addr=ADDR_SONDE, boiler_addr=self.cfg.boiler_addr, lock=request_lock)
             sonde_ops = BoilerOps(sonde_client, boiler_addr=self.cfg.boiler_addr, memory_offset=self.cfg.memory_offset)
 
-        satellite_ops: dict[int, BoilerOps] = {}
+        satellite_ops = {}
         for zone_number in (1, 2, 3):
             zone_cfg = self.cfg.zone(zone_number)
-            if zone_cfg is None or not zone_cfg.uses_virtual_satellite:
-                continue
+            if zone_cfg is None or not zone_cfg.uses_virtual_satellite: continue
             sat_state = ProtocolState(**self.cfg.protocol_state_kwargs(f"satellite_z{zone_number}"))
-            sat_client = FrisquetClient(
-                transport,
-                sat_state,
-                self_addr=_SATELLITE_ADDR[zone_number],
-                boiler_addr=self.cfg.boiler_addr,
-                lock=request_lock,
-            )
+            sat_client = FrisquetClient(transport, sat_state, self_addr=_SATELLITE_ADDR[zone_number], boiler_addr=self.cfg.boiler_addr,
+                lock=request_lock)
             satellite_ops[zone_number] = BoilerOps(sat_client, boiler_addr=self.cfg.boiler_addr, memory_offset=self.cfg.memory_offset)
 
         if self.cfg.connect_reads_enabled and connect_ops is None:
-            log.warning(
-                "boiler_polling_unavailable",
-                reason='connect.mode = "read" or "full" requires a paired connect identity for active memory polling',
-            )
+            log.warning('boiler_polling_unavailable',
+                reason='connect.mode = "read" or "full" requires a paired connect identity for active memory polling')
 
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(transport)
             await transport.listen()
 
-            mqtt_client: aiomqtt.Client | None = None
-            adapter: MqttAdapter | None = None
+            mqtt_client = None
+            adapter = None
 
             async def publish_mqtt() -> None:
                 if adapter is not None and mqtt_client is not None: await adapter.publish_state(mqtt_client)
@@ -186,64 +130,33 @@ class BridgeService:
             _configure_zone_sources(self.cfg, self.data)
             _configure_rf_diagnostics(self.cfg, self.data)
 
-            virtual_satellites: dict[int, VirtualSatellite] = {
-                zone_number: VirtualSatellite(
-                    zone_number,
-                    satellite_ops[zone_number],
-                    self.data,
-                    profile=(self.cfg.zone(zone_number).mode if self.cfg.zone(zone_number) is not None else "virtual_satellite"),
-                    on_update=publish_mqtt,
-                )
-                for zone_number in satellite_ops
-            }
+            virtual_satellites = {zone_number: VirtualSatellite(zone_number, satellite_ops[zone_number],
+                self.data, profile=self.cfg.zone(zone_number).mode if self.cfg.zone(zone_number) is not None else 'virtual_satellite',
+                on_update=publish_mqtt) for zone_number in satellite_ops}
 
             mirror = None
             if self.cfg.connect is not None or enabled_zones:
                 load_zone_state(self.cfg.state_path, self.data)
-                mirror = PassiveMirror(
-                    self.data,
-                    boiler_addr=self.cfg.boiler_addr,
-                    on_update=publish_mqtt,
-                    on_zone_config=lambda: save_zone_state(self.cfg.state_path, self.data),
-                )
+                mirror = PassiveMirror(self.data, boiler_addr=self.cfg.boiler_addr, on_update=publish_mqtt,
+                    on_zone_config=lambda: save_zone_state(self.cfg.state_path, self.data))
 
             poll_connect = connect_ops is not None and self.cfg.connect_reads_enabled
             poll_satellite_info = _has_read_only_satellite_zone(self.cfg, enabled_zones)
-            scheduler = PollScheduler(
-                connect_ops,
-                self.data,
-                poll_connect=poll_connect,
-                poll_satellite_info=poll_satellite_info,
-                sonde_ops=sonde_ops,
-                push_outside_temperature=self.cfg.sonde is not None and self.cfg.sonde.enabled,
-                sensor_interval=self.cfg.sensor_poll_interval_seconds,
-                enabled_zones=enabled_zones,
-                on_update=publish_mqtt,
-            )
+            scheduler = PollScheduler(connect_ops, self.data, poll_connect=poll_connect, poll_satellite_info=poll_satellite_info,
+                sonde_ops=sonde_ops, push_outside_temperature=self.cfg.sonde is not None and self.cfg.sonde.enabled,
+                sensor_interval=self.cfg.sensor_poll_interval_seconds, enabled_zones=enabled_zones, on_update=publish_mqtt)
 
             if self.cfg.mqtt.enabled:
                 availability_topic = f"{self.cfg.mqtt.base_topic.rstrip('/')}/{DEVICE_ID}/availability"
-                mqtt_client = aiomqtt.Client(
-                    hostname=self.cfg.mqtt.host,
-                    port=self.cfg.mqtt.port,
-                    username=self.cfg.mqtt.username or None,
-                    password=self.cfg.mqtt.password or None,
-                    identifier=self.cfg.mqtt.client_id,
-                    will=aiomqtt.Will(availability_topic, "offline", retain=True),
-                )
+                mqtt_client = aiomqtt.Client(hostname=self.cfg.mqtt.host, port=self.cfg.mqtt.port, username=self.cfg.mqtt.username or None,
+                    password=self.cfg.mqtt.password or None, identifier=self.cfg.mqtt.client_id,
+                    will=aiomqtt.Will(availability_topic, 'offline', retain=True))
                 log.info("mqtt_connecting", host=self.cfg.mqtt.host, port=self.cfg.mqtt.port, client_id=self.cfg.mqtt.client_id)
                 await stack.enter_async_context(mqtt_client)
                 log.info("mqtt_connected", host=self.cfg.mqtt.host, port=self.cfg.mqtt.port, client_id=self.cfg.mqtt.client_id)
-                adapter = MqttAdapter(
-                    self.cfg,
-                    self.data,
-                    connect_ops,
-                    sonde_ops=sonde_ops,
-                    outside_temperature_writer=scheduler.send_outside_temperature_now,
-                    virtual_satellites=virtual_satellites,
-                    on_state_change=publish_mqtt,
-                    on_persist_state=lambda: save_zone_state(self.cfg.state_path, self.data),
-                )
+                adapter = MqttAdapter(self.cfg, self.data, connect_ops, sonde_ops=sonde_ops,
+                    outside_temperature_writer=scheduler.send_outside_temperature_now, virtual_satellites=virtual_satellites,
+                    on_state_change=publish_mqtt, on_persist_state=lambda: save_zone_state(self.cfg.state_path, self.data))
                 await adapter.publish_discovery(mqtt_client)
 
             async def rf_loop() -> None:
@@ -251,8 +164,7 @@ class BridgeService:
                     if mirror is not None:
                         await mirror.handle(received)
                         await mirror.notify()
-                    if self._stop.is_set():
-                        break
+                    if self._stop.is_set(): break
 
             async def mqtt_loop() -> None:
                 if adapter is None or mqtt_client is None: return
@@ -262,10 +174,7 @@ class BridgeService:
                 if adapter is None or mqtt_client is None: return
                 await self._publish_diagnostics(adapter, mqtt_client)
 
-            tasks = [
-                asyncio.create_task(scheduler.run(), name="scheduler"),
-                asyncio.create_task(rf_loop(), name="rf"),
-            ]
+            tasks = [asyncio.create_task(scheduler.run(), name='scheduler'), asyncio.create_task(rf_loop(), name='rf')]
             if adapter is not None:
                 tasks.append(asyncio.create_task(mqtt_loop(), name="mqtt"))
                 tasks.append(asyncio.create_task(diagnostics_loop(), name="diagnostics"))
@@ -274,11 +183,9 @@ class BridgeService:
             for task in tasks: task.add_done_callback(self._log_task_done)
 
             log.info("service_started", tasks=[task.get_name() for task in tasks])
-            failure: BaseException | None = None
-            try:
-                await self._wait_for_stop_or_transport_failure(transport.wait_failed())
-            except BaseException as exc:
-                failure = exc
+            failure = None
+            try: await self._wait_for_stop_or_transport_failure(transport.wait_failed())
+            except BaseException as exc: failure = exc
             scheduler.stop()
             for satellite in virtual_satellites.values(): satellite.stop()
             for task in tasks: task.cancel()
@@ -286,37 +193,21 @@ class BridgeService:
             if adapter is not None and mqtt_client is not None:
                 await self._publish_offline_preserving_failure(adapter, mqtt_client, failure)
             log.info("service_stopped")
-            if failure is not None:
-                raise failure
+            if failure is not None: raise failure
 
-    async def _publish_offline_preserving_failure(
-        self,
-        adapter: MqttAdapter, # adapter to publish the offline state with
-        mqtt_client: aiomqtt.Client, # connected MQTT client
-        failure: BaseException | None, # shutdown failure to re-raise afterwards
-    ) -> None:
-        try:
-            await adapter.publish_offline(mqtt_client)
+    async def _publish_offline_preserving_failure(self, adapter: MqttAdapter, mqtt_client: aiomqtt.Client, failure: BaseException | None) -> None:
+        try: await adapter.publish_offline(mqtt_client)
         except Exception:
-            if failure is None:
-                raise
+            if failure is None: raise
             log.exception("mqtt_offline_publish_failed_during_shutdown")
 
-    async def _wait_for_stop_or_transport_failure(
-        self,
-        failure: object, # awaitable that completes when the transport fails
-    ) -> None:
+    async def _wait_for_stop_or_transport_failure(self, failure: object) -> None:
         stop_task = asyncio.create_task(self._stop.wait())
         failure_task = asyncio.ensure_future(failure)  # type: ignore[arg-type]
-        done, pending = await asyncio.wait(
-            (stop_task, failure_task),
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
+        done, pending = await asyncio.wait((stop_task, failure_task), return_when=asyncio.FIRST_COMPLETED)
+        for task in pending: task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        if failure_task in done:
-            await failure_task
+        if failure_task in done: await failure_task
 
     def _log_task_done(self, task: asyncio.Task[object]) -> None:
         if task.cancelled(): return

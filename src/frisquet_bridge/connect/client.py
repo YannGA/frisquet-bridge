@@ -1,4 +1,4 @@
-"""High-level protocol client: request/response loop, reads, writes, pairing."""
+'High-level protocol client: request/response loop, reads, writes, pairing.'
 
 from __future__ import annotations
 
@@ -10,15 +10,7 @@ from dataclasses import dataclass
 import structlog
 
 from frisquet_bridge.connect.state import ProtocolState
-from frisquet_bridge.frame import (
-    ADDR_BOILER,
-    ADDR_CONNECT,
-    MSG_ADDRESS_NOT_FOUND,
-    MSG_ASSOCIATION,
-    MSG_READ,
-    Frame,
-    association_network_id,
-)
+from frisquet_bridge.frame import ADDR_BOILER, ADDR_CONNECT, MSG_ADDRESS_NOT_FOUND, MSG_ASSOCIATION, MSG_READ, Frame, association_network_id
 from frisquet_bridge.transport.base import Transport, TransportError
 
 log = structlog.get_logger(__name__)
@@ -38,15 +30,9 @@ class Association:
 
 
 class AddressNotFound(TransportError):
-    """The boiler rejected a matching operation because its address is unknown."""
+    'The boiler rejected a matching operation because its address is unknown.'
 
-    def __init__(
-        self,
-        *,
-        request_msg_type: int, # message type of the rejected request
-        request_payload: bytes, # payload of the rejected request
-        response: Frame, # the boiler's NACK frame
-    ) -> None:
+    def __init__(self, *, request_msg_type: int, request_payload: bytes, response: Frame) -> None:
         self.request_msg_type = request_msg_type
         self.request_payload = request_payload
         self.response = response
@@ -54,65 +40,49 @@ class AddressNotFound(TransportError):
 
 
 class RequestTimeout(TransportError):
-    """No matching RF response arrived before all request attempts expired."""
+    'No matching RF response arrived before all request attempts expired.'
 
 
 class FrisquetClient:
-    """Drives request/response exchanges with the boiler over a Transport."""
+    'Drives request/response exchanges with the boiler over a Transport.'
 
     def __init__(
         self,
-        transport: Transport, # transport used to send and receive raw frames
-        state: ProtocolState, # shared protocol ids (network / association / request)
+        transport: Transport,
+        state: ProtocolState,
         *,
-        self_addr: int = ADDR_CONNECT, # source address Connect transmits from
-        boiler_addr: int = ADDR_BOILER, # destination address of the boiler
+        self_addr: int = ADDR_CONNECT,
+        boiler_addr: int = ADDR_BOILER,
         lock: asyncio.Lock | None = None, # serialise exchanges across clients sharing one modem
     ) -> None:
         self._transport = transport
         self._state = state
         self._self_addr = self_addr
         self._boiler_addr = boiler_addr
-        self._last_response_rssi: int | None = None
-        self._attempt_outcome_callback: ContextVar[Callable[[str, int | None], None] | None] = ContextVar(
-            f"rf_attempt_outcome_{id(self)}", default=None
-        )
+        self._last_response_rssi = None
+        self._attempt_outcome_callback = ContextVar(f'rf_attempt_outcome_{id(self)}', default=None)
         # Serialises request/response exchanges so multiple clients sharing one
         # modem (connect + sonde + satellites) don't transmit over each other.
         self._lock = lock or asyncio.Lock()
 
     @property
-    def state(self) -> ProtocolState:
-        return self._state
+    def state(self) -> ProtocolState: return self._state
 
     @property
-    def last_response_rssi(self) -> int | None:
-        return self._last_response_rssi
+    def last_response_rssi(self) -> int | None: return self._last_response_rssi
 
     def set_attempt_outcome_callback(self, callback: Callable[[str, int | None], None]) -> Token:
-        """Install a task-local request-attempt observer and return its reset token."""
+        'Install a task-local request-attempt observer and return its reset token.'
         return self._attempt_outcome_callback.set(callback)
 
-    def reset_attempt_outcome_callback(self, token: Token) -> None:
-        self._attempt_outcome_callback.reset(token)
+    def reset_attempt_outcome_callback(self, token: Token) -> None: self._attempt_outcome_callback.reset(token)
 
     def _record_attempt_outcome(self, outcome: str, rssi: int | None = None) -> None:
         callback = self._attempt_outcome_callback.get()
         if callback is not None: callback(outcome, rssi)
 
-    async def request(
-        self,
-        *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
-        payload: bytes, # message payload
-        from_addr: int | None = None, # source address (defaults to self_addr)
-        to_addr: int | None = None, # destination address (defaults to boiler_addr)
-        timeout: float = _DEFAULT_TIMEOUT, # seconds to wait for each response
-        retries: int = _DEFAULT_RETRIES, # number of request attempts
-        burst: int = 1, # identical frames sent per attempt
-        burst_interval: float = 0.0, # seconds between frames of a burst
-    ) -> Frame:
+    async def request(self, *, control: int, msg_type: int, payload: bytes, from_addr: int | None = None, to_addr: int | None = None,
+        timeout: float = _DEFAULT_TIMEOUT, retries: int = _DEFAULT_RETRIES, burst: int = 1, burst_interval: float = 0.0) -> Frame:
         """Send a frame and await the boiler's matching response.
 
         The response is identified by swapped addresses and the same
@@ -128,122 +98,62 @@ class FrisquetClient:
         to_addr = self._boiler_addr if to_addr is None else to_addr
 
         async with self._lock:
-            return await self._request_locked(
-                control=control,
-                msg_type=msg_type,
-                payload=payload,
-                from_addr=from_addr,
-                to_addr=to_addr,
-                timeout=timeout,
-                retries=retries,
-                burst=burst,
-                burst_interval=burst_interval,
-            )
+            return await self._request_locked(control=control, msg_type=msg_type, payload=payload, from_addr=from_addr, to_addr=to_addr,
+                timeout=timeout, retries=retries, burst=burst, burst_interval=burst_interval)
 
-    async def _request_locked(
-        self,
-        *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
-        payload: bytes, # message payload
-        from_addr: int, # source address
-        to_addr: int, # destination address
-        timeout: float, # seconds to wait for each response
-        retries: int, # number of request attempts
-        burst: int = 1, # identical frames sent per attempt
-        burst_interval: float = 0.0, # seconds between frames of a burst
-    ) -> Frame:
+    async def _request_locked(self, *, control: int, msg_type: int, payload: bytes, from_addr: int, to_addr: int, timeout: float, retries: int,
+        burst: int = 1, burst_interval: float = 0.0) -> Frame:
         await self._transport.set_network_id(self._state.network_id)
 
         async with self._transport.subscribe() as queue:
-            last_error: Exception | None = None
+            last_error = None
             for attempt in range(1, retries + 1):
                 req_id = self._state.next_request_id()
-                frame = Frame(
-                    to_addr=to_addr,
-                    from_addr=from_addr,
-                    association_id=self._state.association_id,
-                    request_id=req_id,
-                    control=control,
-                    msg_type=msg_type,
-                    payload=payload,
-                )
+                frame = Frame(to_addr=to_addr, from_addr=from_addr, association_id=self._state.association_id, request_id=req_id,
+                    control=control, msg_type=msg_type, payload=payload)
                 _drain(queue)
                 try:
                     for index in range(max(1, burst)):
                         await self._transport.send(frame)
-                        if index + 1 < burst and burst_interval > 0:
-                            await asyncio.sleep(burst_interval)
+                        if index + 1 < burst and burst_interval > 0: await asyncio.sleep(burst_interval)
                 except TransportError as exc:
                     self._record_attempt_outcome("transport_failure")
                     last_error = exc
-                    log.warning(
-                        "request_send_failed",
-                        attempt=attempt,
-                        retries=retries,
-                        to_addr=f"0x{to_addr:02x}",
-                        from_addr=f"0x{from_addr:02x}",
-                        association_id=f"0x{self._state.association_id:02x}",
-                        request_id=f"0x{req_id:02x}",
-                        msg_type=f"0x{msg_type:02x}",
-                        error=str(exc),
-                    )
+                    log.warning('request_send_failed', attempt=attempt, retries=retries, to_addr=f'0x{to_addr:02x}',
+                        from_addr=f'0x{from_addr:02x}', association_id=f'0x{self._state.association_id:02x}', request_id=f'0x{req_id:02x}',
+                        msg_type=f'0x{msg_type:02x}', error=str(exc))
                     continue
 
                 try:
-                    response = await self._await_match(
-                        queue,
-                        from_addr=to_addr,
-                        to_addr=from_addr,
-                        association_id=self._state.association_id,
-                        request_id=req_id,
-                        control=control,
-                        msg_type=msg_type,
-                        request_payload=payload,
-                        timeout=timeout,
-                    )
+                    response = await self._await_match(queue, from_addr=to_addr, to_addr=from_addr, association_id=self._state.association_id,
+                        request_id=req_id, control=control, msg_type=msg_type, request_payload=payload, timeout=timeout)
                 except AddressNotFound:
                     self._record_attempt_outcome("nack")
                     raise
                 if response is not None:
                     self._record_attempt_outcome("success", self._last_response_rssi)
-                    log.debug(
-                        "request_succeeded",
-                        attempt=attempt,
-                        to_addr=f"0x{to_addr:02x}",
-                        from_addr=f"0x{from_addr:02x}",
-                        association_id=f"0x{self._state.association_id:02x}",
-                        request_id=f"0x{req_id:02x}",
-                        msg_type=f"0x{msg_type:02x}",
-                    )
+                    log.debug('request_succeeded', attempt=attempt, to_addr=f'0x{to_addr:02x}', from_addr=f'0x{from_addr:02x}',
+                        association_id=f'0x{self._state.association_id:02x}', request_id=f'0x{req_id:02x}', msg_type=f'0x{msg_type:02x}')
                     return response
                 last_error = RequestTimeout("no matching response")
                 self._record_attempt_outcome("timeout")
-                log.warning(
-                    "request_no_response",
-                    attempt=attempt,
-                    retries=retries,
-                    to_addr=f"0x{to_addr:02x}",
-                    from_addr=f"0x{from_addr:02x}",
-                    association_id=f"0x{self._state.association_id:02x}",
-                    request_id=f"0x{req_id:02x}",
-                    msg_type=f"0x{msg_type:02x}",
-                )
+                log.warning('request_no_response', attempt=attempt, retries=retries, to_addr=f'0x{to_addr:02x}',
+                    from_addr=f'0x{from_addr:02x}', association_id=f'0x{self._state.association_id:02x}', request_id=f'0x{req_id:02x}',
+                    msg_type=f'0x{msg_type:02x}')
 
-            if isinstance(last_error, RequestTimeout):
-                raise RequestTimeout(f"request failed after {retries} attempts: {last_error}")
+            if isinstance(last_error, RequestTimeout): raise RequestTimeout(f"request failed after {retries} attempts: {last_error}")
             raise TransportError(f"request failed after {retries} attempts: {last_error}")
 
     async def send_oneway(
         self,
         *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
-        payload: bytes, # message payload
-        from_addr: int | None = None, # source address (defaults to self_addr)
-        to_addr: int | None = None, # destination address (defaults to boiler_addr)
-        repeats: int = 1, # times to (re)send the frame
-        interval: float = 0.0, # seconds between repeat sends
+        control: int,
+        msg_type: int,
+        payload: bytes,
+        from_addr: int | None = None,
+        to_addr: int | None = None,
+        repeats: int = 1,
+        interval: float = 0.0,
         on_attempt_outcome: Callable[[str, int | None], None] | None = None, # per-send outcome observer
     ) -> None:
         """Transmit a frame without awaiting a response (fire-and-forget).
@@ -265,47 +175,28 @@ class FrisquetClient:
                 try:
                     await self._transport.set_network_id(self._state.network_id)
                     req_id = self._state.next_request_id()
-                    frame = Frame(
-                        to_addr=to_addr,
-                        from_addr=from_addr,
-                        association_id=self._state.association_id,
-                        request_id=req_id,
-                        control=control,
-                        msg_type=msg_type,
-                        payload=payload,
-                    )
+                    frame = Frame(to_addr=to_addr, from_addr=from_addr, association_id=self._state.association_id, request_id=req_id,
+                        control=control, msg_type=msg_type, payload=payload)
                     await self._transport.send(frame)
                 except TransportError:
                     if on_attempt_outcome is not None: on_attempt_outcome("transport_failure", None)
                     raise
                 if on_attempt_outcome is not None: on_attempt_outcome("success", None)
-            if interval > 0 and index + 1 < repeats:
-                await asyncio.sleep(interval)
+            if interval > 0 and index + 1 < repeats: await asyncio.sleep(interval)
 
     async def read_memory(
         self,
-        address: int, # memory address to read
-        size: int, # bytes to read
+        address: int,
+        size: int,
         **kwargs: object # extra FrisquetClient.request options
     ) -> bytes:
-        """READ ``size`` bytes at ``address``; returns the response payload."""
+        'READ ``size`` bytes at ``address``; returns the response payload.'
         payload = address.to_bytes(2, "big") + size.to_bytes(2, "big")
         response = await self.request(control=0x01, msg_type=MSG_READ, payload=payload, **kwargs)  # type: ignore[arg-type]
         return response.payload
 
-    async def _await_match(
-        self,
-        queue: asyncio.Queue, # frames received on the transport subscription
-        *,
-        from_addr: int, # expected response source (the request's destination)
-        to_addr: int, # expected response destination
-        association_id: int, # expected association id
-        request_id: int, # expected request id
-        control: int, # request control byte, used to match an ACK or NACK
-        msg_type: int, # expected response message type
-        request_payload: bytes, # request payload, carried on AddressNotFound
-        timeout: float, # seconds to wait for a matching frame
-    ) -> Frame | None:
+    async def _await_match(self, queue: asyncio.Queue, *, from_addr: int, to_addr: int, association_id: int, request_id: int, control: int,
+        msg_type: int, request_payload: bytes, timeout: float) -> Frame | None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
@@ -313,24 +204,17 @@ class FrisquetClient:
             if remaining <= 0: return None
             try: received = await asyncio.wait_for(queue.get(), remaining)
             except TimeoutError: return None
-            if not received.frame.matches(
-                from_addr=from_addr,
-                to_addr=to_addr,
-                association_id=association_id,
-                request_id=request_id,
-            ) or not received.frame.is_ack:
-                continue
-            if received.frame.msg_type == MSG_ADDRESS_NOT_FOUND:
-                if received.frame.control != ((control & 0x7F) | 0x80):
-                    continue
+            frame = received.frame
+            if not frame.matches(from_addr=from_addr, to_addr=to_addr, association_id=association_id, request_id=request_id) or not frame.is_ack: continue
+            if frame.msg_type == MSG_ADDRESS_NOT_FOUND:
+                if frame.control != ((control & 0x7F) | 0x80): continue
                 raise AddressNotFound(
                     request_msg_type=msg_type,
                     request_payload=request_payload,
-                    response=received.frame,
-                )
-            if received.frame.msg_type == msg_type:
+                    response=frame)
+            if frame.msg_type == msg_type:
                 self._last_response_rssi = received.rssi
-                return received.frame
+                return frame
 
     async def recover_network_id(self, *, timeout: float = 30.0) -> bytes:
         """Sniff the boiler's association broadcast and return its network id.
@@ -357,7 +241,7 @@ class FrisquetClient:
 
     async def pair(
         self,
-        from_addr: int, # source address to reply from
+        from_addr: int,
         *, listen_window: float = 5.0, # seconds of silence that end the listen
     ) -> Association:
         """Listen for the boiler's association broadcast and reply.
@@ -368,7 +252,7 @@ class FrisquetClient:
         await self._transport.set_network_id(b"\xff\xff\xff\xff")
         log.info("pairing_waiting", from_addr=f"0x{from_addr:02x}", listen_window=listen_window)
 
-        result: Association | None = None
+        result = None
         async with self._transport.subscribe() as queue:
             while True:
                 try: received = await asyncio.wait_for(queue.get(), listen_window)
@@ -380,27 +264,11 @@ class FrisquetClient:
                 network_id = association_network_id(frame)
                 if network_id is None: continue
 
-                result = Association(
-                    network_id=network_id,
-                    association_id=frame.association_id,
-                    request_id=frame.request_id,
-                )
-                log.info(
-                    "pairing_broadcast_received",
-                    from_addr=f"0x{from_addr:02x}",
-                    network_id=network_id.hex(),
-                    association_id=f"0x{frame.association_id:02x}",
-                    request_id=f"0x{frame.request_id:02x}",
-                )
-                reply = Frame(
-                    to_addr=ADDR_BOILER,
-                    from_addr=from_addr,
-                    association_id=frame.association_id,
-                    request_id=frame.request_id,
-                    control=frame.control + 0x80,
-                    msg_type=MSG_ASSOCIATION,
-                    payload=CONNECT_VERSION,
-                )
+                result = Association(network_id=network_id, association_id=frame.association_id, request_id=frame.request_id)
+                log.info('pairing_broadcast_received', from_addr=f'0x{from_addr:02x}', network_id=network_id.hex(),
+                    association_id=f'0x{frame.association_id:02x}', request_id=f'0x{frame.request_id:02x}')
+                reply = Frame(to_addr=ADDR_BOILER, from_addr=from_addr, association_id=frame.association_id, request_id=frame.request_id,
+                    control=frame.control + 128, msg_type=MSG_ASSOCIATION, payload=CONNECT_VERSION)
                 await self._transport.send(reply)
 
 

@@ -1,4 +1,4 @@
-"""Tests for the virtual satellite runner."""
+'Tests for the virtual satellite runner.'
 
 from __future__ import annotations
 
@@ -11,9 +11,7 @@ from frisquet_bridge.satellite import VirtualSatellite
 from frisquet_bridge.transport.base import TransportError
 from tests.helpers import FakeTransport
 
-_SATELLITE_INFO = bytes.fromhex(
-    "2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000"
-)
+_SATELLITE_INFO = bytes.fromhex('2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000')
 
 
 def _satellite(data, transport, *, on_update=None):

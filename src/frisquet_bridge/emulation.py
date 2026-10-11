@@ -1,65 +1,40 @@
-"""Passive Connect + virtual satellite emulation."""
+'Passive Connect + virtual satellite emulation.'
 
 from __future__ import annotations
 
-import contextlib
-import logging
-from collections.abc import Awaitable, Callable
+import contextlib, logging
+from collections.abc import Callable
 
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_DATE,
-    ADDR_DHW_MODE,
-    ADDR_SATELLITE_CONSIGNE,
-    ADDR_SENSORS,
-    ADDR_ZONE_CONFIG,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_init_response,
-    decode_sensors,
-    decode_zone_consigne,
-    decode_zone_init,
-    decode_zone_read,
-    memory_address,
-)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_CONSIGNE, ADDR_SENSORS,
+    ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_init_response, decode_sensors,
+    decode_zone_consigne, decode_zone_init, decode_zone_read, memory_address)
 from frisquet_bridge.frame import ADDR_CONNECT, MSG_INIT, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData
 from frisquet_bridge.transport.base import ReceivedFrame
+from frisquet_bridge.types import UpdateNotify
 
 log = logging.getLogger(__name__)
 
 ZONE_IDS = {0x08: 1, 0x09: 2, 0x0A: 3}
 
 
-def _consigne_addrs(
-    zone: int, # zone number (1-3)
-    boiler_addr: int, # boiler address for the memory-mapped alias
-) -> set[int]:
+def _consigne_addrs(zone: int, boiler_addr: int) -> set[int]:
     base = ADDR_SATELLITE_CONSIGNE + 0x0005 * (zone - 1)
     return {base, memory_address(base, boiler_addr=boiler_addr)}
 
 
 class PassiveMirror:
-    """Sniff RF traffic and mirror boiler responses into the data model."""
+    'Sniff RF traffic and mirror boiler responses into the data model.'
 
-    def __init__(
-        self,
-        data: BoilerData, # aggregate state to mirror boiler responses into
-        *,
-        boiler_addr: int = 0x80, # address of the boiler we mirror
-        on_update: Callable[[], Awaitable[None]] | None = None, # callback awaited after a mirrored update
-        on_zone_config: Callable[[], None] | None = None, # callback run when a zone config is learned
-    ) -> None:
+    def __init__(self, data: BoilerData, *, boiler_addr: int = 0x80, on_update: UpdateNotify | None = None,
+        on_zone_config: Callable[[], None] | None = None) -> None:
         self._data = data
         self._boiler_addr = boiler_addr
         self._on_update = on_update
         self._on_zone_config = on_zone_config
         # READ request address keyed by (association_id, request_id) so the
         # boiler's response can be matched back to the address that was asked.
-        self._pending_reads: dict[tuple[int, int], int] = {}
+        self._pending_reads = {}
 
     def _persist_zone_config(self) -> None:
         if self._on_zone_config is not None: self._on_zone_config()
@@ -70,8 +45,7 @@ class PassiveMirror:
         # Connect (our own emulated client or a real Connect box) querying the
         # boiler: remember the READ address to decode the matching response below.
         if frame.from_addr == ADDR_CONNECT and frame.to_addr == self._boiler_addr:
-            if frame.msg_type == MSG_INIT:
-                self._handle_connect_init_request(frame)
+            if frame.msg_type == MSG_INIT: self._handle_connect_init_request(frame)
             elif frame.msg_type == MSG_READ and len(frame.payload) >= 2:
                 addr = int.from_bytes(frame.payload[0:2], "big")
                 self._pending_reads[(frame.association_id, frame.request_id)] = addr
@@ -83,23 +57,16 @@ class PassiveMirror:
         # learn them.
         if frame.to_addr == self._boiler_addr and frame.msg_type == MSG_INIT:
             zone = ZONE_IDS.get(frame.from_addr)
-            if zone is not None and self._handle_satellite_report(zone, frame):
-                return
+            if zone is not None and self._handle_satellite_report(zone, frame): return
 
-        if frame.from_addr != self._boiler_addr or frame.to_addr != ADDR_CONNECT:
-            return
+        if frame.from_addr != self._boiler_addr or frame.to_addr != ADDR_CONNECT: return
 
         if frame.msg_type == MSG_READ:
             addr = self._pending_reads.pop((frame.association_id, frame.request_id), None)
             self._handle_read_response(addr, frame.payload)
-        elif frame.msg_type == MSG_INIT:
-            self._handle_boiler_init_response(frame)
+        elif frame.msg_type == MSG_INIT: self._handle_boiler_init_response(frame)
 
-    def _handle_satellite_report(
-        self,
-        zone: int, # zone number the satellite belongs to
-        frame: Frame, # satellite's MSG_INIT frame addressed to the boiler
-    ) -> bool:
+    def _handle_satellite_report(self, zone: int, frame: Frame) -> bool:
         if frame.payload[:2] == b"\xa1\x54":
             with contextlib.suppress(ValueError):
                 decode_zone_read(frame.payload, zone, self._data)
@@ -107,8 +74,7 @@ class PassiveMirror:
             return True
         write_addr = int.from_bytes(frame.payload[4:6], "big") if len(frame.payload) >= 6 else 0
         if write_addr in _consigne_addrs(zone, self._boiler_addr):
-            with contextlib.suppress(ValueError):
-                decode_zone_consigne(frame.payload, zone, self._data)
+            with contextlib.suppress(ValueError): decode_zone_consigne(frame.payload, zone, self._data)
             return True
         return False
 
@@ -132,39 +98,27 @@ class PassiveMirror:
                 self._persist_zone_config()
             return
         if len(frame.payload) >= 43:
-            with contextlib.suppress(ValueError):
-                decode_satellite_init_response(frame.payload, self._data)
+            with contextlib.suppress(ValueError): decode_satellite_init_response(frame.payload, self._data)
 
-    def _addr_pair(self, base: int) -> tuple[int, int]:
-        return (base, memory_address(base, boiler_addr=self._boiler_addr))
+    def _addr_pair(self, base: int) -> tuple[int, int]: return (base, memory_address(base, boiler_addr=self._boiler_addr))
 
-    def _handle_read_response(
-        self,
-        addr: int | None, # READ address remembered from the request, if matched
-        payload: bytes, # boiler's response payload
-    ) -> None:
+    def _handle_read_response(self, addr: int | None, payload: bytes) -> None:
         if addr is None: return
         if addr in self._addr_pair(ADDR_SENSORS):
-            try:
-                decode_sensors(payload, self._data)
-            except ValueError:
-                log.debug("ignored short sensors payload")
+            try: decode_sensors(payload, self._data)
+            except ValueError: log.debug("ignored short sensors payload")
             return
         if addr in self._addr_pair(ADDR_CONSUMPTION):
-            with contextlib.suppress(ValueError):
-                decode_consumption(payload, self._data)
+            with contextlib.suppress(ValueError): decode_consumption(payload, self._data)
             return
         if addr in self._addr_pair(ADDR_DAILY_CONSUMPTION):
-            with contextlib.suppress(ValueError):
-                decode_daily_consumption(payload, self._data)
+            with contextlib.suppress(ValueError): decode_daily_consumption(payload, self._data)
             return
         if addr in self._addr_pair(ADDR_DHW_MODE):
-            with contextlib.suppress(ValueError):
-                decode_dhw_mode(payload, self._data)
+            with contextlib.suppress(ValueError): decode_dhw_mode(payload, self._data)
             return
         if addr in self._addr_pair(ADDR_DATE):
-            with contextlib.suppress(ValueError):
-                decode_clock(payload, self._data)
+            with contextlib.suppress(ValueError): decode_clock(payload, self._data)
 
     async def notify(self) -> None:
         if self._on_update is not None: await self._on_update()

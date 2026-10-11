@@ -1,4 +1,4 @@
-"""Frisquet protocol operations (no MQTT dependency)."""
+'Frisquet protocol operations (no MQTT dependency).'
 
 from frisquet_bridge.connect.client import Association, FrisquetClient
 from frisquet_bridge.connect.ops import BoilerOps

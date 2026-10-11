@@ -1,29 +1,12 @@
-"""Passive helpers for interpreting sniffed Connect read traffic."""
+'Passive helpers for interpreting sniffed Connect read traffic.'
 
 from __future__ import annotations
 
 import logging
 
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_DATE,
-    ADDR_DHW_MODE,
-    ADDR_SATELLITE_INFO,
-    ADDR_SENSORS,
-    ADDR_SENSORS_APP,
-    ADDR_ZONE_CONFIG,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_info,
-    decode_sensors,
-    decode_zone_init,
-    describe_boiler_event,
-    describe_memory_push,
-    memory_address,
-)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_INFO, ADDR_SENSORS,
+    ADDR_SENSORS_APP, ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_info,
+    decode_sensors, decode_zone_init, describe_boiler_event, describe_memory_push, memory_addrs)
 from frisquet_bridge.frame import ADDR_BOILER, MSG_BOILER_EVENT, MSG_INIT, MSG_MEMORY_PUSH, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData, ZoneSource
 
@@ -32,13 +15,13 @@ ZONE_IDS = {0x08: 1, 0x09: 2, 0x0A: 3}
 
 
 class PassiveReadTracker:
-    """Track READ request/response pairs and describe known responses."""
+    'Track READ request/response pairs and describe known responses.'
 
     def __init__(self, *, boiler_addr: int = ADDR_BOILER) -> None:
         self._boiler_addr = boiler_addr
-        self._last_reads: dict[tuple[int, int, int], int] = {}
-        self._last_init_reads: dict[tuple[int, int], int] = {}
-        self._last_init_writes: dict[tuple[int, int], int] = {}
+        self._last_reads = {}
+        self._last_init_reads = {}
+        self._last_init_writes = {}
 
     def describe(self, frame: Frame) -> str | None:
         if frame.msg_type == MSG_MEMORY_PUSH: return self._describe_memory_push(frame)
@@ -69,17 +52,13 @@ class PassiveReadTracker:
             return f"READ response addr=0x{addr:04x} len={len(frame.payload)}{_suffix(name)}"
 
         data = BoilerData()
-        try:
-            decode_consumption(frame.payload, data)
+        try: decode_consumption(frame.payload, data)
         except ValueError as exc:
             log.warning("consumption response could not be decoded: %s", exc)
             return f"CONSUMPTION response too short len={len(frame.payload)}"
 
         return (
-            "CONSUMPTION "
-            f"dhw={data.boiler.dhw_consumption} kWh "
-            f"heating={data.boiler.heating_consumption} kWh"
-        )
+            f'CONSUMPTION dhw={data.boiler.dhw_consumption} kWh heating={data.boiler.heating_consumption} kWh')
 
     def _describe_init(self, frame: Frame) -> str | None:
         key = (frame.association_id, frame.request_id)
@@ -91,10 +70,8 @@ class PassiveReadTracker:
         if init_read == ADDR_SATELLITE_INFO: return "INIT request addr=0xa029 (satellite_info)"
         if init_write == ADDR_ZONE_CONFIG: return _describe_zone_init(frame)
 
-        if self._last_init_writes.get(key) == ADDR_ZONE_CONFIG:
-            return _describe_zone_init(frame, allow_length_prefixed=True)
-        if self._last_init_reads.get(key) == ADDR_SATELLITE_INFO:
-            return _describe_satellite_info(frame)
+        if self._last_init_writes.get(key) == ADDR_ZONE_CONFIG: return _describe_zone_init(frame, allow_length_prefixed=True)
+        if self._last_init_reads.get(key) == ADDR_SATELLITE_INFO: return _describe_satellite_info(frame)
         return None
 
     def _describe_memory_push(self, frame: Frame) -> str | None:
@@ -106,18 +83,13 @@ class PassiveReadTracker:
         return describe_boiler_event(frame.payload)
 
 
-def consumption_addrs(boiler_addr: int) -> set[int]:
-    return memory_addrs(ADDR_CONSUMPTION, boiler_addr)
+def consumption_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_CONSUMPTION, boiler_addr)
 
 
-def daily_consumption_addrs(boiler_addr: int) -> set[int]:
-    return memory_addrs(ADDR_DAILY_CONSUMPTION, boiler_addr)
+def daily_consumption_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_DAILY_CONSUMPTION, boiler_addr)
 
 
-def read_addr_name(
-    addr: int, # memory address of the read
-    boiler_addr: int, # boiler's base address
-) -> str | None:
+def read_addr_name(addr: int, boiler_addr: int) -> str | None:
     if addr in memory_addrs(ADDR_SENSORS, boiler_addr): return "sensors"
     if addr in memory_addrs(ADDR_SENSORS_APP, boiler_addr): return "sensors_app"
     if addr in memory_addrs(ADDR_CONSUMPTION, boiler_addr): return "consumption"
@@ -127,58 +99,37 @@ def read_addr_name(
     return None
 
 
-def sensor_addrs(boiler_addr: int) -> set[int]:
-    return memory_addrs(ADDR_SENSORS, boiler_addr) | memory_addrs(ADDR_SENSORS_APP, boiler_addr)
+def sensor_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_SENSORS, boiler_addr) | memory_addrs(ADDR_SENSORS_APP, boiler_addr)
 
 
-def memory_addrs(
-    base: int, # base address of the value
-    boiler_addr: int, # boiler's base address
-) -> set[int]:
-    return {base, memory_address(base, boiler_addr=boiler_addr)}
-
-
-def _suffix(name: str | None) -> str:
-    return f" ({name})" if name else ""
+def _suffix(name: str | None) -> str: return f" ({name})" if name else ""
 
 
 def _describe_sensors(payload: bytes) -> str:
     data = BoilerData()
-    try:
-        decode_sensors(payload, data)
+    try: decode_sensors(payload, data)
     except ValueError as exc:
         log.warning("sensors response could not be decoded: %s", exc)
         return f"SENSORS response too short len={len(payload)}"
     b = data.boiler
-    return (
-        "SENSORS "
-        f"dhw={_fmt(b.dhw_temperature)}°C "
-        f"cdc={_fmt(b.cdc_temperature)}°C "
-        f"dhw_power={_fmt(b.dhw_power)}kW "
-        f"heating_power={_fmt(b.heating_power)}kW "
-        f"pressure={_fmt(b.pressure)}bar"
-    )
+    return (f"SENSORS dhw={_fmt(b.dhw_temperature)}°C cdc={_fmt(b.cdc_temperature)}°C dhw_power={_fmt(b.dhw_power)}kW "
+        f"heating_power={_fmt(b.heating_power)}kW pressure={_fmt(b.pressure)}bar")
 
 
 def _describe_daily_consumption(payload: bytes) -> str:
     data = BoilerData()
-    try:
-        decode_daily_consumption(payload, data)
+    try: decode_daily_consumption(payload, data)
     except ValueError as exc:
         log.warning("daily consumption response could not be decoded: %s", exc)
         return f"DAILY_CONSUMPTION response too short len={len(payload)}"
 
     return (
-        "DAILY_CONSUMPTION "
-        f"dhw={data.boiler.daily_dhw_consumption} kWh "
-        f"heating={data.boiler.daily_heating_consumption} kWh"
-    )
+        f'DAILY_CONSUMPTION dhw={data.boiler.daily_dhw_consumption} kWh heating={data.boiler.daily_heating_consumption} kWh')
 
 
 def _describe_dhw_mode(payload: bytes) -> str:
     data = BoilerData()
-    try:
-        decode_dhw_mode(payload, data)
+    try: decode_dhw_mode(payload, data)
     except ValueError as exc:
         log.warning("dhw mode response could not be decoded: %s", exc)
         return f"DHW_MODE response too short len={len(payload)}"
@@ -187,37 +138,30 @@ def _describe_dhw_mode(payload: bytes) -> str:
 
 def _describe_clock(payload: bytes) -> str:
     data = BoilerData()
-    try:
-        decode_clock(payload, data)
+    try: decode_clock(payload, data)
     except ValueError as exc:
         log.warning("clock response could not be decoded: %s", exc)
         return f"CLOCK response too short len={len(payload)}"
     return f"CLOCK {data.last_seen_date or 'unknown'}"
 
 
-def _fmt(value: float | None) -> str:
-    return "n/a" if value is None else f"{value:.1f}"
+def _fmt(value: float | None) -> str: return "n/a" if value is None else f"{value:.1f}"
 
 
 def _describe_zone_init(
-    frame: Frame, # candidate zone-init frame
+    frame: Frame,
     *, allow_length_prefixed: bool = False, # accept the short length-prefixed write form
 ) -> str | None:
     zone = _frame_zone(frame)
-    if zone is None or not _looks_like_zone_init(frame.payload, allow_length_prefixed=allow_length_prefixed):
-        return None
+    if zone is None or not _looks_like_zone_init(frame.payload, allow_length_prefixed=allow_length_prefixed): return None
 
     data = BoilerData()
     decode_zone_init(frame.payload, zone, data)
     z = data.zones[zone]
     mode = z.mode.value if z.mode is not None else "unknown"
     boost = "on" if z.boost else "off"
-    detail = (
-        f"ZONE{zone} mode={mode} boost={boost} "
-        f"comfort={_fmt(z.comfort_temperature)}°C "
-        f"reduced={_fmt(z.reduced_temperature)}°C "
-        f"frost={_fmt(z.frost_temperature)}°C"
-    )
+    detail = (f"ZONE{zone} mode={mode} boost={boost} comfort={_fmt(z.comfort_temperature)}°C "
+        f"reduced={_fmt(z.reduced_temperature)}°C frost={_fmt(z.frost_temperature)}°C")
     if z.auto_comfort is not None: detail += f" auto={'comfort' if z.auto_comfort else 'reduced'}"
     if z.override: detail += " override=on"
     if z.schedule is not None: detail += f" schedule_raw={z.schedule.compact_hex()}"
@@ -231,7 +175,7 @@ def _frame_zone(frame: Frame) -> int | None:
 
 
 def _looks_like_zone_init(
-    payload: bytes, # INIT payload to inspect
+    payload: bytes,
     *, allow_length_prefixed: bool = False, # accept the short length-prefixed write form
 ) -> bool:
     if len(payload) >= 15 and payload[4:6] == b"\xa1\x54": return True
@@ -243,24 +187,18 @@ def _describe_satellite_info(frame: Frame) -> str | None:
     if zone is None or not frame.is_ack: return None
     data = BoilerData()
     for zone in data.zones.values(): zone.source = ZoneSource.SATELLITE
-    try:
-        decode_satellite_info(frame.payload, data)
+    try: decode_satellite_info(frame.payload, data)
     except ValueError as exc:
         log.warning("satellite info response could not be decoded: %s", exc)
         return f"SATELLITE_INFO response too short len={len(frame.payload)}"
     b = data.boiler
     status = b.status.value if b.status is not None else "unknown"
-    parts = [
-        f"SATELLITE_INFO clock={data.last_seen_date or 'unknown'}",
-        f"status={status}",
-        f"outside={_fmt(b.outside_temperature)}°C",
-    ]
+    parts = [f"SATELLITE_INFO clock={data.last_seen_date or 'unknown'}", f'status={status}', f'outside={_fmt(b.outside_temperature)}°C']
     for n in (1, 2, 3):
         z = data.zones[n]
         if z.mode is None and z.ambient_temperature is None and z.setpoint_temperature is None: continue
         parts.append(
-            f"z{n}=mode:{_zone_mode_label(z)} amb:{_fmt(z.ambient_temperature)}°C setpoint:{_fmt(z.setpoint_temperature)}°C"
-        )
+            f"z{n}=mode:{_zone_mode_label(z)} amb:{_fmt(z.ambient_temperature)}°C setpoint:{_fmt(z.setpoint_temperature)}°C")
     return " ".join(parts)
 
 

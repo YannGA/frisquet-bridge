@@ -1,4 +1,4 @@
-"""Decode boiler memory blocks into the data model."""
+'Decode boiler memory blocks into the data model.'
 
 from __future__ import annotations
 
@@ -7,16 +7,7 @@ from dataclasses import dataclass
 
 from frisquet_bridge.connect.codec import BoilerDate, decode_pressure16, decode_temp16, decode_temp8
 from frisquet_bridge.frame import DEVICE_NAMES
-from frisquet_bridge.model import (
-    OUTSIDE_TEMP_ABSENT,
-    BoilerData,
-    BoilerStatus,
-    DhwMode,
-    ZoneMode,
-    ZoneSchedule,
-    ZoneSource,
-    ZoneState,
-)
+from frisquet_bridge.model import OUTSIDE_TEMP_ABSENT, BoilerData, BoilerStatus, DhwMode, ZoneMode, ZoneSchedule, ZoneSource, ZoneState
 
 ADDR_SENSORS = 0x79E0
 ADDR_SENSORS_APP = 0x79FC
@@ -37,20 +28,13 @@ TEMP16_ABSENT = 127.0
 TEMP16_EXTREME_ABSENT = 258.1
 
 
-def memory_address(
-    base: int, # base block address
-    *,
-    boiler_addr: int, # boiler address; 0x84 reads the alternate (BOILER_ALT_OFFSET) bank
-) -> int:
-    return base + (BOILER_ALT_OFFSET if boiler_addr == 0x84 else 0)
+def memory_address(base: int, *, boiler_addr: int) -> int: return base + (BOILER_ALT_OFFSET if boiler_addr == 0x84 else 0)
 
 
-def memory_addrs(base: int, boiler_addr: int) -> set[int]:
-    return {base, memory_address(base, boiler_addr=boiler_addr)}
+def memory_addrs(base: int, boiler_addr: int) -> set[int]: return {base, memory_address(base, boiler_addr=boiler_addr)}
 
 
-def _i16(data: bytes, offset: int) -> float:
-    return decode_temp16(data[offset : offset + 2])
+def _i16(data: bytes, offset: int) -> float: return decode_temp16(data[offset : offset + 2])
 
 
 def _temp16(data: bytes, offset: int) -> float | None:
@@ -65,15 +49,13 @@ def _plausible(value: float | None, low: float, high: float) -> float | None:
 
 def _outside_temp16(data: bytes, offset: int) -> float | None:
     value = _i16(data, offset)
-    if value in (OUTSIDE_TEMP_ABSENT, TEMP16_EXTREME_ABSENT):
-        return None
+    if value in (OUTSIDE_TEMP_ABSENT, TEMP16_EXTREME_ABSENT): return None
     return _plausible(value, -40.0, 80.0)
 
 
 def decode_sensors(payload: bytes, data: BoilerData) -> None:
-    """Decode the 0x79e0 sensor block (OpenFrisquetVisio / frisquet-connect layout)."""
-    if len(payload) < 57:
-        raise ValueError(f"sensors payload too short: {len(payload)} bytes")
+    'Decode the 0x79e0 sensor block (OpenFrisquetVisio / frisquet-connect layout).'
+    if len(payload) < 57: raise ValueError(f"sensors payload too short: {len(payload)} bytes")
 
     b = data.boiler
     b.dhw_temperature = _plausible(_temp16(payload, 1), 0.0, 95.0)
@@ -102,27 +84,19 @@ def decode_sensors(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_consumption(payload: bytes, data: BoilerData) -> None:
-    if len(payload) < 5:
-        raise ValueError(f"consumption payload too short: {len(payload)} bytes")
+    if len(payload) < 5: raise ValueError(f"consumption payload too short: {len(payload)} bytes")
     data.boiler.dhw_consumption = struct.unpack(">h", payload[1:3])[0]
     data.boiler.heating_consumption = struct.unpack(">h", payload[3:5])[0]
 
 
 def decode_daily_consumption(payload: bytes, data: BoilerData) -> None:
-    if len(payload) < 23:
-        raise ValueError(f"daily consumption payload too short: {len(payload)} bytes")
+    if len(payload) < 23: raise ValueError(f"daily consumption payload too short: {len(payload)} bytes")
     data.boiler.daily_dhw_consumption = struct.unpack(">h", payload[19:21])[0]
     data.boiler.daily_heating_consumption = struct.unpack(">h", payload[21:23])[0]
 
 
-def decode_dhw_mode(
-    payload: bytes, # DHW mode block (0xa0fc)
-    data: BoilerData, # BoilerData to populate
-    *,
-    frame_bits: int | None = None, # override the frame bits instead of masking the payload
-) -> None:
-    if not payload:
-        raise ValueError(f"dhw mode payload too short: {len(payload)} bytes")
+def decode_dhw_mode(payload: bytes, data: BoilerData, *, frame_bits: int | None = None) -> None:
+    if not payload: raise ValueError(f"dhw mode payload too short: {len(payload)} bytes")
     raw = payload[2] if len(payload) >= 3 else payload[0]
     bits = raw & 0x81 if frame_bits is None else frame_bits
     data.boiler.dhw_frame_bits = bits
@@ -131,8 +105,7 @@ def decode_dhw_mode(
 
 
 def decode_clock(payload: bytes, data: BoilerData) -> None:
-    if len(payload) < 9:
-        raise ValueError(f"clock payload too short: {len(payload)} bytes")
+    if len(payload) < 9: raise ValueError(f"clock payload too short: {len(payload)} bytes")
     date = BoilerDate.decode(payload[1:9])
     data.last_seen_date = date.isoformat()
 
@@ -146,8 +119,7 @@ def init_response_body(payload: bytes) -> bytes:
     if payload and payload[0] in (0x2A, 0x30):
         length = payload[0]
         end = 1 + length
-        if len(payload) >= end:
-            return payload[1:end]
+        if len(payload) >= end: return payload[1:end]
     return payload
 
 
@@ -159,39 +131,26 @@ def decode_satellite_init_response(payload: bytes, data: BoilerData) -> None:
     decode_satellite_info(body, data)
 
 
-def decode_zone_read(
-    payload: bytes, # READ response or raw memory block
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
-) -> None:
-    """Decode zone config from a READ response or raw memory block."""
+def decode_zone_read(payload: bytes, zone: int, data: BoilerData) -> None:
+    'Decode zone config from a READ response or raw memory block.'
     for start in (0, 1, 2):
-        if len(payload) - start < 48:
-            continue
+        if len(payload) - start < 48: continue
         block = payload[start : start + 48]
-        if ZoneMode.from_byte(block[3]) is None:
-            continue
+        if ZoneMode.from_byte(block[3]) is None: continue
         decode_zone_init(block, zone, data)
         return
     decode_zone_init(payload, zone, data)
 
 
-def decode_zone_init(
-    payload: bytes, # INIT (0xa154) frame or raw block
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
-) -> None:
-    """Decode a zone INIT (0xa154) into zone state."""
+def decode_zone_init(payload: bytes, zone: int, data: BoilerData) -> None:
+    'Decode a zone INIT (0xa154) into zone state.'
     body = _zone_init_body(payload)
-    if len(body) < 6:
-        return
+    if len(body) < 6: return
     zs = data.zones[zone]
-    if zs.source == ZoneSource.VIRTUAL:
-        return
+    if zs.source == ZoneSource.VIRTUAL: return
     mode_options = body[4]
     boost = bool(mode_options & 0b0100_0000)
-    if not boost:
-        zs.comfort_temperature = decode_temp8(body[0])
+    if not boost: zs.comfort_temperature = decode_temp8(body[0])
     zs.reduced_temperature = decode_temp8(body[1])
     zs.frost_temperature = decode_temp8(body[2])
     mode = ZoneMode.from_byte(body[3])
@@ -206,14 +165,12 @@ def decode_zone_init(
         zs.override = False
         zs.auto_comfort = None
     zs.boost = boost
-    if len(body) >= 48:
-        zs.schedule = ZoneSchedule.decode(body[6:48])
+    if len(body) >= 48: zs.schedule = ZoneSchedule.decode(body[6:48])
 
 
 def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
-    """Decode the 0xa029 satellite/boiler state block returned to satellites."""
-    if len(payload) < 43:
-        raise ValueError(f"satellite info payload too short: {len(payload)} bytes")
+    'Decode the 0xa029 satellite/boiler state block returned to satellites.'
+    if len(payload) < 43: raise ValueError(f"satellite info payload too short: {len(payload)} bytes")
 
     ext = _outside_temp16(payload, 1)
     if ext is not None: data.boiler.outside_temperature = ext
@@ -227,11 +184,7 @@ def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
     _decode_satellite_zone(payload, data, zone=3, offset=33)
 
 
-def decode_zone_consigne(
-    payload: bytes, # satellite setpoint INIT (0xa02f) frame
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
-) -> None:
+def decode_zone_consigne(payload: bytes, zone: int, data: BoilerData) -> None:
     """Decode a satellite's setpoint INIT (0xa02f write) into zone state.
 
     Mirrors OpenFrisquetVisio ``donneesSatellite_t``: a 9-byte INIT header
@@ -239,11 +192,9 @@ def decode_zone_consigne(
     setpoint(2), unknown(1), mode(1), options(2).
     """
     zs = data.zones[zone]
-    if zs.source != ZoneSource.SATELLITE:
-        return
+    if zs.source != ZoneSource.SATELLITE: return
     body = payload[9:] if len(payload) >= 9 else b""
-    if len(body) < 6:
-        return
+    if len(body) < 6: return
     ambient = _temp16(body, 0)
     setpoint = _temp16(body, 2)
     if ambient is not None: zs.ambient_temperature = ambient
@@ -252,35 +203,21 @@ def decode_zone_consigne(
 
 
 # (auto_comfort, derogation/override) -> satellite mode byte for an auto zone.
-_AUTO_SATELLITE_MODE = {
-    (True, True): 0x03,
-    (True, False): 0x05,
-    (False, True): 0x02,
-    (False, False): 0x04,
-}
+_AUTO_SATELLITE_MODE = {(True, True): 3, (True, False): 5, (False, True): 2, (False, False): 4}
 
 
-def encode_satellite_mode(
-    zone: ZoneState, # ZoneState to encode
-    *,
-    connect_compat: bool = False, # XOR 0x20 to match the Connect-compatible encoding
-) -> int:
+def encode_satellite_mode(zone: ZoneState, *, connect_compat: bool = False) -> int:
     """Encode zone mode for a satellite setpoint frame (see Satellite::getMode).
 
     Optionally XORs 0x20 to match the Connect-compatible encoding the boiler
     expects when a Connect module participates in the network.
     """
     mode = zone.mode
-    if mode == ZoneMode.FROST:
-        raw = 0x10
-    elif mode == ZoneMode.COMFORT:
-        raw = 0x01
-    elif mode == ZoneMode.REDUCED:
-        raw = 0x00
-    elif mode == ZoneMode.AUTO:
-        raw = _AUTO_SATELLITE_MODE[(bool(zone.auto_comfort), bool(zone.override))]
-    else:
-        raise ValueError(f"zone {zone.zone}: mode unknown, cannot encode satellite consigne")
+    if mode == ZoneMode.FROST: raw = 0x10
+    elif mode == ZoneMode.COMFORT: raw = 0x01
+    elif mode == ZoneMode.REDUCED: raw = 0x00
+    elif mode == ZoneMode.AUTO: raw = _AUTO_SATELLITE_MODE[(bool(zone.auto_comfort), bool(zone.override))]
+    else: raise ValueError(f"zone {zone.zone}: mode unknown, cannot encode satellite consigne")
     return raw ^ 0x20 if connect_compat else raw
 
 
@@ -294,20 +231,12 @@ def _zone_init_body(payload: bytes) -> bytes:
     return payload
 
 
-def _decode_satellite_zone(
-    payload: bytes, # satellite info block
-    data: BoilerData, # BoilerData to populate
-    *,
-    zone: int, # zone number to populate
-    offset: int, # byte offset of this zone's block
-) -> None:
+def _decode_satellite_zone(payload: bytes, data: BoilerData, *, zone: int, offset: int) -> None:
     zs = data.zones[zone]
-    if zs.source != ZoneSource.SATELLITE:
-        return
+    if zs.source != ZoneSource.SATELLITE: return
     ambient = _temp16(payload, offset)
     setpoint = _temp16(payload, offset + 2)
-    if ambient is None and setpoint in (None, 0.0):
-        return
+    if ambient is None and setpoint in (None, 0.0): return
     zs.ambient_temperature = ambient
     zs.setpoint_temperature = setpoint
     _set_satellite_mode(payload[offset + 5], zs)
@@ -315,8 +244,7 @@ def _decode_satellite_zone(
 
 def _set_satellite_mode(raw: int, zone: object) -> None:
     decoded = _decode_satellite_mode(raw)
-    if decoded is None:
-        return
+    if decoded is None: return
     mode, auto_comfort, override = decoded
     zone.mode = mode
     zone.auto_comfort = auto_comfort
@@ -325,26 +253,19 @@ def _set_satellite_mode(raw: int, zone: object) -> None:
 
 def _decode_satellite_mode(raw: int) -> tuple[ZoneMode, bool | None, bool] | None:
     for value in (raw, raw ^ 0x20):
-        if value == 0x00:
-            return ZoneMode.REDUCED, None, False
-        if value == 0x01:
-            return ZoneMode.COMFORT, None, False
-        if value == 0x02:
-            return ZoneMode.AUTO, False, True
-        if value == 0x03:
-            return ZoneMode.AUTO, True, True
-        if value == 0x04:
-            return ZoneMode.AUTO, False, False
-        if value == 0x05:
-            return ZoneMode.AUTO, True, False
-        if value == 0x10:
-            return ZoneMode.FROST, None, False
+        if value == 0x00: return ZoneMode.REDUCED, None, False
+        if value == 0x01: return ZoneMode.COMFORT, None, False
+        if value == 0x02: return ZoneMode.AUTO, False, True
+        if value == 0x03: return ZoneMode.AUTO, True, True
+        if value == 0x04: return ZoneMode.AUTO, False, False
+        if value == 0x05: return ZoneMode.AUTO, True, False
+        if value == 0x10: return ZoneMode.FROST, None, False
     return None
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryPush:
-    """Boiler-initiated memory block update (msg_type 0x10)."""
+    'Boiler-initiated memory block update (msg_type 0x10).'
 
     address: int
     length: int
@@ -368,74 +289,46 @@ class BoilerEventPush:
 
     @property
     def kind_label(self) -> str:
-        if self.kind == BOILER_EVENT_KIND_SET:
-            return "set"
-        if self.kind == BOILER_EVENT_KIND_CLEAR:
-            return "clear"
+        if self.kind == BOILER_EVENT_KIND_SET: return "set"
+        if self.kind == BOILER_EVENT_KIND_CLEAR: return "clear"
         return f"0x{self.kind:02x}"
 
 
 def memory_push_address(payload: bytes) -> int | None:
-    if len(payload) < 2:
-        return None
+    if len(payload) < 2: return None
     return int.from_bytes(payload[0:2], "big")
 
 
 def parse_memory_push(payload: bytes) -> MemoryPush:
-    if len(payload) < 4:
-        raise ValueError(f"memory push payload too short: {len(payload)} bytes")
+    if len(payload) < 4: raise ValueError(f"memory push payload too short: {len(payload)} bytes")
     address = int.from_bytes(payload[0:2], "big")
     length = int.from_bytes(payload[2:4], "big")
     body = payload[4 : 4 + length]
-    if len(body) != length:
-        raise ValueError(f"memory push truncated: expected {length} body bytes, got {len(body)}")
+    if len(body) != length: raise ValueError(f"memory push truncated: expected {length} body bytes, got {len(body)}")
     return MemoryPush(address=address, length=length, body=body)
 
 
 def parse_boiler_event_push(payload: bytes) -> BoilerEventPush:
-    if len(payload) != 21:
-        raise ValueError(f"boiler event payload must be 21 bytes, got {len(payload)}")
-    return BoilerEventPush(
-        kind=payload[0],
-        memory_tag=payload[1:4],
-        stamp=payload[4:8],
-        tail=payload[8:21],
-    )
+    if len(payload) != 21: raise ValueError(f"boiler event payload must be 21 bytes, got {len(payload)}")
+    return BoilerEventPush(kind=payload[0], memory_tag=payload[1:4], stamp=payload[4:8], tail=payload[8:21])
 
 
-def decode_memory_push(
-    payload: bytes, # MEMORY_PUSH (0x10) payload
-    data: BoilerData, # BoilerData to update for known blocks
-    *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
-) -> MemoryPush:
-    """Parse a MEMORY_PUSH (0x10) and update ``data`` when the block is known."""
+def decode_memory_push(payload: bytes, data: BoilerData, *, boiler_addr: int = 0x80) -> MemoryPush:
+    'Parse a MEMORY_PUSH (0x10) and update ``data`` when the block is known.'
     push = parse_memory_push(payload)
-    if push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
-        decode_dhw_mode(push.body, data)
+    if push.address in memory_addrs(ADDR_DHW_MODE, boiler_addr): decode_dhw_mode(push.body, data)
     return push
 
 
-def memory_push_block_name(
-    address: int, # memory block address
-    *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
-) -> str | None:
-    if address in memory_addrs(ADDR_DHW_MODE, boiler_addr):
-        return "dhw_mode"
+def memory_push_block_name(address: int, *, boiler_addr: int = 0x80) -> str | None:
+    if address in memory_addrs(ADDR_DHW_MODE, boiler_addr): return "dhw_mode"
     return None
 
 
-def describe_memory_push(
-    payload: bytes, # MEMORY_PUSH (0x10) payload
-    *,
-    boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
-) -> str:
+def describe_memory_push(payload: bytes, *, boiler_addr: int = 0x80) -> str:
     data = BoilerData()
-    try:
-        push = parse_memory_push(payload)
-    except ValueError as exc:
-        return f"MEMORY_PUSH decode error: {exc}"
+    try: push = parse_memory_push(payload)
+    except ValueError as exc: return f"MEMORY_PUSH decode error: {exc}"
 
     name = memory_push_block_name(push.address, boiler_addr=boiler_addr) or f"0x{push.address:04x}"
     parts = [f"MEMORY_PUSH addr={name} len=0x{push.length:04x}"]
@@ -444,27 +337,17 @@ def describe_memory_push(
         decode_dhw_mode(push.body, data)
         mode = data.boiler.dhw_mode.value if data.boiler.dhw_mode is not None else "unknown"
         parts.append(f"dhw_mode={mode}")
-    elif push.body:
-        parts.append(f"body={push.body.hex()}")
+    elif push.body: parts.append(f"body={push.body.hex()}")
 
     return " ".join(parts)
 
 
 def describe_boiler_event(payload: bytes) -> str:
-    try:
-        event = parse_boiler_event_push(payload)
-    except ValueError as exc:
-        return f"BOILER_EVENT decode error: {exc}"
+    try: event = parse_boiler_event_push(payload)
+    except ValueError as exc: return f"BOILER_EVENT decode error: {exc}"
 
     tag = event.memory_tag
-    parts = [
-        "BOILER_EVENT",
-        f"kind={event.kind_label}",
-        f"tag=0x{tag.hex()}",
-        f"device={DEVICE_NAMES.get(tag[1], f'0x{tag[1]:02x}')}",
-        f"param=0x{tag[2]:02x}",
-        f"stamp={event.stamp.hex()}",
-    ]
-    if event.tail != b"\x00" * 13:
-        parts.append(f"tail={event.tail.hex()}")
+    parts = ['BOILER_EVENT', f'kind={event.kind_label}', f'tag=0x{tag.hex()}', f"device={DEVICE_NAMES.get(tag[1], f'0x{tag[1]:02x}')}",
+        f'param=0x{tag[2]:02x}', f'stamp={event.stamp.hex()}']
+    if event.tail != b"\x00" * 13: parts.append(f"tail={event.tail.hex()}")
     return " ".join(parts)

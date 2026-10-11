@@ -1,20 +1,11 @@
-"""Tests for Frisquet field encode/decode helpers."""
+'Tests for Frisquet field encode/decode helpers.'
 
 from __future__ import annotations
 
 import pytest
 
-from frisquet_bridge.connect.codec import (
-    BoilerDate,
-    decode_pressure16,
-    decode_temp8,
-    decode_temp16,
-    encode_pressure16,
-    encode_temp8,
-    encode_temp16,
-)
-
-
+from frisquet_bridge.connect.codec import (BoilerDate, decode_pressure16, decode_temp8, decode_temp16, encode_pressure16, encode_temp8,
+    encode_temp16)
 def test_temperature_and_pressure_codecs_round_trip():
     # Sonde test vector: 92 tenths -> 9.2 C.
     assert decode_temp16(bytes.fromhex("005c")) == pytest.approx(9.2)

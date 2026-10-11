@@ -109,3 +109,9 @@ from fastcore.utils import *
 ```
 
 `from fastcore.utils import *` already provides `os`, `Path`, and much of the stdlib. Don't re-import those alongside it.
+
+## Style Tooling
+
+`chkstyle` is the style authority: it enforces these conventions mechanically, so run it before committing (`uvx --from fastaistyle chkstyle src tests`). Ruff stays a lint backstop, set to chkstyle's 160-character hard limit rather than a lower one it would fight.
+
+Docments belong on high-level entrypoints only: CLI commands, the service entry, and the `Transport` interface. Internal helpers, decoders and private methods carry no parameter comments — make the names say it instead.
