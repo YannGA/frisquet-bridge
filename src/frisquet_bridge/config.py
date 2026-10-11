@@ -305,20 +305,8 @@ def load(path: str | Path) -> BridgeConfig:
         cfg.mqtt.language = _parse_mqtt_language(str(mqtt.get("language", cfg.mqtt.language)), "mqtt.language")
 
     logging_config = _optional_table(data, "logging") or {}
-    _validate_keys(
-        logging_config,
-        {
-            "level",
-            "format",
-            "file",
-            "file_max_bytes",
-            "file_backup_count",
-            "raw_file",
-            "raw_max_bytes",
-            "raw_backup_count",
-            "raw_lines",
-        },
-        "logging")
+    _validate_keys(logging_config, {"level", "format", "file", "file_max_bytes", "file_backup_count", "raw_file", "raw_max_bytes",
+        "raw_backup_count", "raw_lines"}, "logging")
     if logging_config:
         cfg.logging.level = str(logging_config.get("level", cfg.logging.level)).upper()
         cfg.logging.format = str(logging_config.get("format", cfg.logging.format))

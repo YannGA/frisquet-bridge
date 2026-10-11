@@ -11,7 +11,6 @@ HA climate entity.
 from __future__ import annotations
 
 import asyncio, contextlib
-from collections.abc import Awaitable, Callable
 
 import structlog
 
@@ -19,6 +18,7 @@ from frisquet_bridge.boiler_profile import central_boiler_consigne, simple_consi
 from frisquet_bridge.climate import zone_target_temperature
 from frisquet_bridge.connect.ops import BoilerOps
 from frisquet_bridge.model import BoilerData
+from frisquet_bridge.types import UpdateNotify
 
 log = structlog.get_logger(__name__)
 
@@ -43,7 +43,7 @@ class VirtualSatellite:
         interval: float = CONSIGNE_INTERVAL, # seconds between periodic sends
         connect_compat: bool = False, # encode modes the way the official Connect app does
         profile: str = "virtual_satellite", # consigne profile: virtual_satellite, central_boiler or simple_satellite
-        on_update: Callable[[], Awaitable[None]] | None = None, # callback invoked after each send attempt
+        on_update: UpdateNotify | None = None,
     ) -> None:
         self._zone = zone
         self._ops = ops

@@ -3,29 +3,15 @@
 from __future__ import annotations
 
 import contextlib, logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_DATE,
-    ADDR_DHW_MODE,
-    ADDR_SATELLITE_CONSIGNE,
-    ADDR_SENSORS,
-    ADDR_ZONE_CONFIG,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_init_response,
-    decode_sensors,
-    decode_zone_consigne,
-    decode_zone_init,
-    decode_zone_read,
-    memory_address,)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_CONSIGNE, ADDR_SENSORS,
+    ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_init_response, decode_sensors,
+    decode_zone_consigne, decode_zone_init, decode_zone_read, memory_address)
 from frisquet_bridge.frame import ADDR_CONNECT, MSG_INIT, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData
 from frisquet_bridge.transport.base import ReceivedFrame
+from frisquet_bridge.types import UpdateNotify
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +34,8 @@ class PassiveMirror:
         data: BoilerData, # aggregate state to mirror boiler responses into
         *,
         boiler_addr: int = 0x80, # address of the boiler we mirror
-        on_update: Callable[[], Awaitable[None]] | None = None, # callback awaited after a mirrored update
-        on_zone_config: Callable[[], None] | None = None, # callback run when a zone config is learned
+        on_update: UpdateNotify | None = None,
+        on_zone_config: Callable[[], None] | None = None,
     ) -> None:
         self._data = data
         self._boiler_addr = boiler_addr

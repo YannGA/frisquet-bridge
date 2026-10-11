@@ -9,6 +9,7 @@ import structlog
 
 from frisquet_bridge.connect.ops import BoilerOps
 from frisquet_bridge.model import BoilerData
+from frisquet_bridge.types import UpdateNotify
 
 log = structlog.get_logger(__name__)
 
@@ -46,7 +47,7 @@ class PollScheduler:
         outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL, # seconds before retrying a failed write
         outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL, # min seconds between change-driven writes
         enabled_zones: tuple[int, ...] = (1, 2, 3), # zone numbers whose state is logged
-        on_update: Callable[[], Awaitable[None]] | None = None, # callback awaited after every poll
+        on_update: UpdateNotify | None = None,
     ) -> None:
         self._ops = ops
         self._data = data
@@ -136,12 +137,8 @@ class PollScheduler:
                 await self._safe_poll("dhw_mode", lambda: self._ops.read_dhw_mode(self._data))
                 await self._safe_poll("clock", lambda: self._ops.read_clock(self._data))
                 slow_due = now + SLOW_INTERVAL
-            if (
-                self._push_outside_temperature
-                and self._sonde_ops is not None
-                and self._data.sonde.outside_temperature is not None
-                and now >= self._outside_temperature_due
-            ):
+            if (self._push_outside_temperature and self._sonde_ops is not None and self._data.sonde.outside_temperature is not None
+                and now >= self._outside_temperature_due):
                 await self._attempt_outside_temperature(only_if_due=True)
             next_due = []
             if self._poll_connect and self._ops is not None: next_due.extend((sensor_due, satellite_info_due, slow_due))
@@ -172,23 +169,9 @@ class PollScheduler:
         d = self._data
         for z in self._enabled_zones:
             zs = d.zones[z]
-            log.info(
-                "zone_state",
-                zone=z,
-                ambient_temperature=zs.ambient_temperature,
-                reported_ambient=zs.reported_ambient,
-                mode=zs.mode.value if zs.mode is not None else None,
-                setpoint_temperature=zs.setpoint_temperature,
-                flow_temperature=zs.flow_temperature,
-                flow_setpoint_temperature=zs.flow_setpoint_temperature,
-                comfort_temperature=zs.comfort_temperature,
-                reduced_temperature=zs.reduced_temperature,
-                frost_temperature=zs.frost_temperature,
-                override=zs.override,
-                boost=zs.boost)
-        log.info(
-            "boiler_state",
-            outside_temperature=d.sonde.outside_temperature,
-            boiler_status=d.boiler.status.value if d.boiler.status is not None else None,
-            boiler_fault=d.boiler.fault,
-            dhw_temperature=d.boiler.dhw_temperature)
+            log.info("zone_state", zone=z, ambient_temperature=zs.ambient_temperature, reported_ambient=zs.reported_ambient,
+                mode=zs.mode.value if zs.mode is not None else None, setpoint_temperature=zs.setpoint_temperature,
+                flow_temperature=zs.flow_temperature, flow_setpoint_temperature=zs.flow_setpoint_temperature, comfort_temperature=zs.comfort_temperature,
+                reduced_temperature=zs.reduced_temperature, frost_temperature=zs.frost_temperature, override=zs.override, boost=zs.boost)
+        log.info("boiler_state", outside_temperature=d.sonde.outside_temperature, boiler_status=d.boiler.status.value if d.boiler.status is not None else None,
+            boiler_fault=d.boiler.fault, dhw_temperature=d.boiler.dhw_temperature)

@@ -153,16 +153,8 @@ class FrisquetClient:
                     continue
 
                 try:
-                    response = await self._await_match(
-                        queue,
-                        from_addr=to_addr,
-                        to_addr=from_addr,
-                        association_id=self._state.association_id,
-                        request_id=req_id,
-                        control=control,
-                        msg_type=msg_type,
-                        request_payload=payload,
-                        timeout=timeout)
+                    response = await self._await_match(queue, from_addr=to_addr, to_addr=from_addr, association_id=self._state.association_id,
+                        request_id=req_id, control=control, msg_type=msg_type, request_payload=payload, timeout=timeout)
                 except AddressNotFound:
                     self._record_attempt_outcome("nack")
                     raise
@@ -251,22 +243,17 @@ class FrisquetClient:
             if remaining <= 0: return None
             try: received = await asyncio.wait_for(queue.get(), remaining)
             except TimeoutError: return None
-            if not received.frame.matches(
-                from_addr=from_addr,
-                to_addr=to_addr,
-                association_id=association_id,
-                request_id=request_id,
-            ) or not received.frame.is_ack:
-                continue
-            if received.frame.msg_type == MSG_ADDRESS_NOT_FOUND:
-                if received.frame.control != ((control & 0x7F) | 0x80): continue
+            frame = received.frame
+            if not frame.matches(from_addr=from_addr, to_addr=to_addr, association_id=association_id, request_id=request_id) or not frame.is_ack: continue
+            if frame.msg_type == MSG_ADDRESS_NOT_FOUND:
+                if frame.control != ((control & 0x7F) | 0x80): continue
                 raise AddressNotFound(
                     request_msg_type=msg_type,
                     request_payload=request_payload,
-                    response=received.frame)
-            if received.frame.msg_type == msg_type:
+                    response=frame)
+            if frame.msg_type == msg_type:
                 self._last_response_rssi = received.rssi
-                return received.frame
+                return frame
 
     async def recover_network_id(self, *, timeout: float = 30.0) -> bytes:
         """Sniff the boiler's association broadcast and return its network id.

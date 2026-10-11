@@ -46,11 +46,8 @@ async def _read(
         await ops.read_clock(data)
     b = data.boiler
     print(f"Boiler clock: {data.last_seen_date or 'n/a'}")
-    print(
-        f"DHW: {_fmt(b.dhw_temperature, '°C')}  "
-        f"DHW instant: {_fmt(b.dhw_instant_temperature, '°C')}  "
-        f"CDC: {_fmt(b.cdc_temperature, '°C')}  "
-        f"CDC safety: {_fmt(b.cdc_safety_temperature, '°C')}")
+    print(f"DHW: {_fmt(b.dhw_temperature, '°C')}  DHW instant: {_fmt(b.dhw_instant_temperature, '°C')}  "
+        f"CDC: {_fmt(b.cdc_temperature, '°C')}  CDC safety: {_fmt(b.cdc_safety_temperature, '°C')}")
     print(f"Flue: {_fmt(b.flue_temperature, '°C')}  Outside: {_fmt(b.outside_temperature, '°C')}  Pressure: {_fmt(b.pressure, ' bar')}")
     print(f"DHW power: {_fmt(b.dhw_power, ' kW')}  Heating: {_fmt(b.heating_power, ' kW')}")
     print(f"Total consumption DHW: {b.dhw_consumption} kWh  Heating: {b.heating_consumption} kWh")
@@ -59,12 +56,8 @@ async def _read(
     enabled_zones = {1: cfg.zone_enabled(1), 2: cfg.zone_enabled(2), 3: cfg.zone_enabled(3)}
     for n, z in data.zones.items():
         if not enabled_zones[n]: continue
-        print(
-            f"Zone {n}: "
-            f"mode {_zone_mode(z)}  "
-            f"ambient {_fmt(z.ambient_temperature, '°C')}  "
-            f"setpoint {_fmt(z.setpoint_temperature, '°C')}  "
-            f"flow {_fmt(z.flow_temperature, '°C')}  "
+        print(f"Zone {n}: mode {_zone_mode(z)}  ambient {_fmt(z.ambient_temperature, '°C')}  "
+            f"setpoint {_fmt(z.setpoint_temperature, '°C')}  flow {_fmt(z.flow_temperature, '°C')}  "
             f"flow setpoint {_fmt(z.flow_setpoint_temperature, '°C')}")
         if z.schedule is not None: print(f"Zone {n} schedule raw: {z.schedule.compact_hex()}")
 

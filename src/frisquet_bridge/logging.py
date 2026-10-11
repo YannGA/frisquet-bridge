@@ -6,7 +6,6 @@ import json, logging, sys
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
 
 import structlog
 
@@ -103,14 +102,8 @@ def configure_logging(
     root.setLevel(_level(effective_level))
     for handler in handlers: root.addHandler(handler)
 
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            *shared_processors,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
+    structlog.configure(processors=[structlog.stdlib.filter_by_level, *shared_processors, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        logger_factory=structlog.stdlib.LoggerFactory(), wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True)
 
     return (

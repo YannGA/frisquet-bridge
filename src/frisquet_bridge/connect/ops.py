@@ -11,23 +11,9 @@ import structlog
 from frisquet_bridge.climate import resolve_zone_intent
 from frisquet_bridge.connect.client import AddressNotFound, FrisquetClient, RequestTimeout
 from frisquet_bridge.connect.codec import encode_temp8, encode_temp16
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_DATE,
-    ADDR_DHW_MODE,
-    ADDR_SATELLITE_CONSIGNE,
-    ADDR_SATELLITE_INFO,
-    ADDR_SENSORS,
-    ADDR_ZONE_CONFIG,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_init_response,
-    decode_sensors,
-    encode_satellite_mode,
-    memory_address,)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_CONSIGNE, ADDR_SATELLITE_INFO,
+    ADDR_SENSORS, ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_init_response,
+    decode_sensors, encode_satellite_mode, memory_address)
 from frisquet_bridge.frame import ADDR_SATELLITE_Z1, MSG_INIT, MSG_SONDE_INIT
 from frisquet_bridge.model import SCHEDULE_DAYS, BoilerData, DhwMode, ZoneMode, ZoneState
 from frisquet_bridge.transport.base import TransportError
@@ -85,11 +71,8 @@ def _zone_metadata_complete(zone: ZoneState) -> bool:
     # schedule is optional: when known we send the full 0x18-byte block (like
     # the official app), otherwise we fall back to OpenFrisquetVisio's short
     # 0x03 write which omits the schedule.
-    return (
-        zone.comfort_temperature is not None
-        and zone.reduced_temperature is not None
-        and zone.frost_temperature is not None
-        and zone.mode_options is not None)
+    return (zone.comfort_temperature is not None and zone.reduced_temperature is not None
+        and zone.frost_temperature is not None and zone.mode_options is not None)
 
 
 class BoilerOps:

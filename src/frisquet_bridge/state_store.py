@@ -38,15 +38,8 @@ def _serialize_zone(zone: ZoneState) -> dict[str, object] | None:
     zone_temperatures = (zone.comfort_temperature, zone.reduced_temperature, zone.frost_temperature, zone.reported_ambient)
     central_values = (zone.central_setpoint, zone.central_demand, zone.central_demand_on_delta, zone.central_demand_off_margin)
     mode_values = (zone.mode, zone.mode_options, zone.auto_comfort)
-    if (
-        zone.schedule is None
-        and all(value is None for value in zone_temperatures)
-        and all(value is None for value in central_values)
-        and all(value is None for value in mode_values)
-        and not zone.override
-        and not zone.boost
-    ):
-        return None
+    if (zone.schedule is None and all(value is None for value in zone_temperatures) and all(value is None for value in central_values)
+        and all(value is None for value in mode_values) and not zone.override and not zone.boost): return None
     schedule_hex = None
     if zone.schedule is not None: schedule_hex = b"".join(zone.schedule.days[day] for day in SCHEDULE_DAYS).hex()
     return dict(mode=zone.mode.value if zone.mode is not None else None, mode_options=zone.mode_options, auto_comfort=zone.auto_comfort,

@@ -10,14 +10,8 @@ from typing import Any
 from frisquet_bridge.cli.options import add_logging_options
 from frisquet_bridge.config import BridgeConfig, ConfigError, load
 from frisquet_bridge.connect.client import FrisquetClient
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_SENSORS,
-    ADDR_SENSORS_APP,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_sensors,)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_SENSORS, ADDR_SENSORS_APP, decode_consumption,
+    decode_daily_consumption, decode_sensors)
 from frisquet_bridge.connect.state import ProtocolState
 from frisquet_bridge.logging import RawMessageRecorder
 from frisquet_bridge.model import BoilerData
@@ -29,13 +23,9 @@ DEFAULT_SIZE = 0x001C
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "probe-memory",
-        help="Read boiler memory blocks repeatedly for reverse-engineering",
-        description=(
-            "Read one or more boiler memory blocks with the paired Connect identity. "
-            "Address specs may be single values like 0x7a18 or ranges like 0x79c4-0x7a6c/0x1c."
-        ))
+    p = sub.add_parser("probe-memory", help="Read boiler memory blocks repeatedly for reverse-engineering",
+        description=("Read one or more boiler memory blocks with the paired Connect identity. "
+            "Address specs may be single values like 0x7a18 or ranges like 0x79c4-0x7a6c/0x1c."))
     p.add_argument("addresses", nargs="*", help="Memory address specs; defaults to the known sensor/consumption neighborhood")
     p.add_argument("--config", default="config.toml", help="Config file path")
     p.add_argument("--size", default=f"0x{DEFAULT_SIZE:04x}", help="READ size for every block, default 0x001c")

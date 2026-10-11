@@ -85,13 +85,8 @@ def simple_consigne(zone: ZoneState) -> Consigne | None:
 
 
 def central_boiler_consigne(zone: ZoneState) -> Consigne | None:
-    if (
-        zone.central_setpoint is None
-        or zone.central_demand is None
-        or zone.central_demand_on_delta is None
-        or zone.central_demand_off_margin is None
-    ):
-        return None
+    if (zone.central_setpoint is None or zone.central_demand is None
+        or zone.central_demand_on_delta is None or zone.central_demand_off_margin is None): return None
 
     setpoint = zone.central_setpoint
     ambient = (

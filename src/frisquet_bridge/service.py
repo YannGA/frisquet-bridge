@@ -49,13 +49,8 @@ def _configure_rf_diagnostics(
     data: BoilerData, # aggregate state to register RF health entries on
 ) -> None:
     if cfg.connect_reads_enabled:
-        for operation, freshness in (
-            ("connect_sensors", 90.0),
-            ("connect_consumption", 7200.0),
-            ("connect_daily_consumption", 7200.0),
-            ("connect_dhw_mode", 7200.0),
-            ("connect_clock", 7200.0),
-        ):
+        for operation, freshness in (("connect_sensors", 90.0), ("connect_consumption", 7200.0), ("connect_daily_consumption", 7200.0),
+            ("connect_dhw_mode", 7200.0), ("connect_clock", 7200.0)):
             data.rf_health(operation, freshness_seconds=freshness)
         enabled_zones = tuple(zone for zone in (1, 2, 3) if cfg.zone_enabled(zone))
         if _has_read_only_satellite_zone(cfg, enabled_zones): data.rf_health("connect_satellite_info", freshness_seconds=1200.0)
@@ -101,15 +96,9 @@ class BridgeService:
             await asyncio.sleep(interval)
 
     async def run(self) -> None:
-        log.info(
-            "service_starting",
-            serial_port=self.cfg.serial.port,
-            serial_speed=self.cfg.serial.speed,
-            mqtt_enabled=self.cfg.mqtt.enabled,
-            mqtt_host=self.cfg.mqtt.host if self.cfg.mqtt.enabled else None,
-            mqtt_port=self.cfg.mqtt.port if self.cfg.mqtt.enabled else None,
-            connect_mode=self.cfg.connect.mode if self.cfg.connect is not None else None,
-            connect_reads=self.cfg.connect_reads_enabled,
+        log.info("service_starting", serial_port=self.cfg.serial.port, serial_speed=self.cfg.serial.speed, mqtt_enabled=self.cfg.mqtt.enabled,
+            mqtt_host=self.cfg.mqtt.host if self.cfg.mqtt.enabled else None, mqtt_port=self.cfg.mqtt.port if self.cfg.mqtt.enabled else None,
+            connect_mode=self.cfg.connect.mode if self.cfg.connect is not None else None, connect_reads=self.cfg.connect_reads_enabled,
             sensor_poll_interval_seconds=self.cfg.sensor_poll_interval_seconds,
             connect_identity=self.cfg.connect is not None and self.cfg.connect.identity is not None,
             sonde_enabled=self.cfg.sonde is not None and self.cfg.sonde.enabled)

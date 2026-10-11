@@ -42,15 +42,8 @@ MSG_ADDRESS_NOT_FOUND = 0x83
 MSG_TYPE_NAMES = {MSG_READ: 'READ', MSG_MEMORY_PUSH: 'MEMORY_PUSH', MSG_INIT: 'INIT', MSG_BOILER_EVENT: 'BOILER_EVENT',
     MSG_ASSOCIATION: 'ASSOCIATION', MSG_SONDE_INIT: 'SONDE_INIT', MSG_ADDRESS_NOT_FOUND: 'ADDRESS_NOT_FOUND'}
 
-DEVICE_NAMES = {
-    ADDR_BROADCAST: "broadcast",
-    ADDR_SATELLITE_Z1: "satellite_z1",
-    ADDR_SATELLITE_Z2: "satellite_z2",
-    ADDR_SATELLITE_Z3: "satellite_z3",
-    ADDR_SONDE: "sonde_ext",
-    ADDR_CONNECT: "connect",
-    ADDR_BOILER: "boiler",
-    ADDR_BOILER_ALT: "boiler_alt"}
+DEVICE_NAMES = {ADDR_BROADCAST: "broadcast", ADDR_SATELLITE_Z1: "satellite_z1", ADDR_SATELLITE_Z2: "satellite_z2", ADDR_SATELLITE_Z3: "satellite_z3",
+    ADDR_SONDE: "sonde_ext", ADDR_CONNECT: "connect", ADDR_BOILER: "boiler", ADDR_BOILER_ALT: "boiler_alt"}
 
 ACK_FLAG = 0x80
 ASSOC_BROADCAST_CONTROL = 0x02
@@ -102,11 +95,8 @@ class Frame:
         request_id: int, # request id the response must carry
     ) -> bool:
         'True if this frame is the response identified by these fields.'
-        return (
-            self.from_addr == from_addr
-            and self.to_addr == to_addr
-            and self.association_id == association_id
-            and self.request_id == request_id)
+        return (self.from_addr == from_addr and self.to_addr == to_addr
+            and self.association_id == association_id and self.request_id == request_id)
 
     def describe(self) -> str:
         mt = MSG_TYPE_NAMES.get(self.msg_type, f"0x{self.msg_type:02x}")

@@ -4,25 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from frisquet_bridge.connect.decode import (
-    ADDR_CONSUMPTION,
-    ADDR_DAILY_CONSUMPTION,
-    ADDR_DATE,
-    ADDR_DHW_MODE,
-    ADDR_SATELLITE_INFO,
-    ADDR_SENSORS,
-    ADDR_SENSORS_APP,
-    ADDR_ZONE_CONFIG,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_info,
-    decode_sensors,
-    decode_zone_init,
-    describe_boiler_event,
-    describe_memory_push,
-    memory_address,)
+from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMPTION, ADDR_DATE, ADDR_DHW_MODE, ADDR_SATELLITE_INFO, ADDR_SENSORS,
+    ADDR_SENSORS_APP, ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_info,
+    decode_sensors, decode_zone_init, describe_boiler_event, describe_memory_push, memory_address)
 from frisquet_bridge.frame import ADDR_BOILER, MSG_BOILER_EVENT, MSG_INIT, MSG_MEMORY_PUSH, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData, ZoneSource
 
@@ -138,13 +122,8 @@ def _describe_sensors(payload: bytes) -> str:
         log.warning("sensors response could not be decoded: %s", exc)
         return f"SENSORS response too short len={len(payload)}"
     b = data.boiler
-    return (
-        "SENSORS "
-        f"dhw={_fmt(b.dhw_temperature)}°C "
-        f"cdc={_fmt(b.cdc_temperature)}°C "
-        f"dhw_power={_fmt(b.dhw_power)}kW "
-        f"heating_power={_fmt(b.heating_power)}kW "
-        f"pressure={_fmt(b.pressure)}bar")
+    return (f"SENSORS dhw={_fmt(b.dhw_temperature)}°C cdc={_fmt(b.cdc_temperature)}°C dhw_power={_fmt(b.dhw_power)}kW "
+        f"heating_power={_fmt(b.heating_power)}kW pressure={_fmt(b.pressure)}bar")
 
 
 def _describe_daily_consumption(payload: bytes) -> str:
@@ -191,11 +170,8 @@ def _describe_zone_init(
     z = data.zones[zone]
     mode = z.mode.value if z.mode is not None else "unknown"
     boost = "on" if z.boost else "off"
-    detail = (
-        f"ZONE{zone} mode={mode} boost={boost} "
-        f"comfort={_fmt(z.comfort_temperature)}°C "
-        f"reduced={_fmt(z.reduced_temperature)}°C "
-        f"frost={_fmt(z.frost_temperature)}°C")
+    detail = (f"ZONE{zone} mode={mode} boost={boost} comfort={_fmt(z.comfort_temperature)}°C "
+        f"reduced={_fmt(z.reduced_temperature)}°C frost={_fmt(z.frost_temperature)}°C")
     if z.auto_comfort is not None: detail += f" auto={'comfort' if z.auto_comfort else 'reduced'}"
     if z.override: detail += " override=on"
     if z.schedule is not None: detail += f" schedule_raw={z.schedule.compact_hex()}"
