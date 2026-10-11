@@ -14,6 +14,7 @@ from frisquet_bridge.frame import (
     ADDR_CONNECT,
     MSG_ADDRESS_NOT_FOUND,
     MSG_ASSOCIATION,
+    MSG_INIT,
     MSG_READ,
     Frame,
 )
@@ -210,6 +211,55 @@ async def test_wrong_identity_and_non_ack_nacks_are_noise_before_success(
 
     assert result == b"success"
     assert len(fake_transport.sent) == 1
+
+
+async def test_request_burst_repeats_the_same_frame_and_accepts_a_mid_burst_reply(
+    fake_transport: FakeTransport,
+    protocol_state: ProtocolState,
+) -> None:
+    # The reference implementation repeats the identical frame (same message id)
+    # on the lossy 0xa029 exchange instead of retrying with a fresh id.
+    fake_transport.auto_reply = False
+    client = FrisquetClient(fake_transport, protocol_state)
+    payload = bytes.fromhex("a0290015")
+
+    task = asyncio.create_task(
+        client.request(
+            control=0x01,
+            msg_type=MSG_INIT,
+            payload=payload,
+            burst=3,
+            burst_interval=0.05,
+            timeout=1.0,
+        )
+    )
+    try:
+        while len(fake_transport.sent) < 2:
+            await asyncio.sleep(0)
+        first = fake_transport.sent[0]
+        # A reply to the *first* frame of the burst must still match, because the
+        # request id does not change inside a burst.
+        fake_transport.push_frame(
+            Frame(
+                to_addr=first.from_addr,
+                from_addr=first.to_addr,
+                association_id=first.association_id,
+                request_id=first.request_id,
+                control=first.control | 0x80,
+                msg_type=MSG_INIT,
+                payload=b"ok",
+            )
+        )
+        response = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    sent = fake_transport.sent
+    assert len(sent) == 3
+    assert {f.request_id for f in sent} == {first.request_id}
+    assert {f.payload for f in sent} == {payload}
+    assert response.payload == b"ok"
 
 
 async def test_pair_success(

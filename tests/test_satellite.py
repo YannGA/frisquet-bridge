@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from frisquet_bridge.connect.client import FrisquetClient
-from frisquet_bridge.connect.ops import BoilerOps
+from frisquet_bridge.connect.ops import A029_RETRIES, BoilerOps
 from frisquet_bridge.connect.state import ProtocolState
 from frisquet_bridge.frame import ADDR_SATELLITE_Z1
 from frisquet_bridge.model import BoilerData, ZoneMode
@@ -73,4 +73,4 @@ async def test_send_failure_publishes_updated_rf_health() -> None:
 
     assert await satellite.send_now() is False
     assert updates == 1
-    assert data.rf_operations["satellite_z1_consigne"].transport_failures == 3
+    assert data.rf_operations["satellite_z1_consigne"].transport_failures == A029_RETRIES

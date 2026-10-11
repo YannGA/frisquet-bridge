@@ -107,11 +107,19 @@ class FrisquetClient:
         to_addr: int | None = None,
         timeout: float = _DEFAULT_TIMEOUT,
         retries: int = _DEFAULT_RETRIES,
+        burst: int = 1,
+        burst_interval: float = 0.0,
     ) -> Frame:
         """Send a frame and await the boiler's matching response.
 
         The response is identified by swapped addresses and the same
         association id / request id (as in frisquet-connect).
+
+        ``burst`` transmits the *identical* frame (same request id and payload)
+        that many times, ``burst_interval`` seconds apart, before waiting for a
+        reply. This mirrors the reference implementation on exchanges where the
+        boiler ignores most individual frames: a reply to any frame of the burst
+        matches, because the request id does not change inside a burst.
         """
         from_addr = self._self_addr if from_addr is None else from_addr
         to_addr = self._boiler_addr if to_addr is None else to_addr
@@ -125,6 +133,8 @@ class FrisquetClient:
                 to_addr=to_addr,
                 timeout=timeout,
                 retries=retries,
+                burst=burst,
+                burst_interval=burst_interval,
             )
 
     async def _request_locked(
@@ -137,6 +147,8 @@ class FrisquetClient:
         to_addr: int,
         timeout: float,
         retries: int,
+        burst: int = 1,
+        burst_interval: float = 0.0,
     ) -> Frame:
         await self._transport.set_network_id(self._state.network_id)
 
@@ -156,7 +168,10 @@ class FrisquetClient:
                 # Drain any frames buffered before this attempt.
                 _drain(queue)
                 try:
-                    await self._transport.send(frame)
+                    for index in range(max(1, burst)):
+                        await self._transport.send(frame)
+                        if index + 1 < burst and burst_interval > 0:
+                            await asyncio.sleep(burst_interval)
                 except TransportError as exc:
                     self._record_attempt_outcome("transport_failure")
                     last_error = exc

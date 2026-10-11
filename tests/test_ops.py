@@ -386,9 +386,9 @@ class _RecordingClient:
 
 
 async def test_send_zone_consigne_uses_the_short_a029_reply_budget() -> None:
-    # Measured live: the 0xa029 exchange answers ~20% of attempts while replies
-    # arrive in 148-750 ms, so the 5 s client default held the shared radio lock
-    # for up to 15 s per lost consigne send.
+    # Measured live: the 0xa029 exchange answers only ~20% of individual frames
+    # while replies arrive in 148-750 ms, so the 5 s client default held the
+    # shared radio lock for up to 15 s per lost consigne send.
     client = _RecordingClient()
     ops = BoilerOps(client, boiler_addr=0x80)  # type: ignore[arg-type]
     data = BoilerData()
@@ -401,9 +401,34 @@ async def test_send_zone_consigne_uses_the_short_a029_reply_budget() -> None:
     assert client.calls[0]["timeout"] == ops_module.A029_TIMEOUT
     assert client.calls[0]["retries"] == ops_module.A029_RETRIES
     assert ops_module.A029_TIMEOUT < 5.0
-    # The three attempts stay: ~20% per-attempt success means dropping one would
-    # cut consigne delivery by about a quarter.
-    assert ops_module.A029_RETRIES == 3
+    # Six frames per send (two bursts of three) is the reference's budget for
+    # this exchange; at ~20% per frame that puts a send near 74%.
+    assert ops_module.A029_RETRIES * ops_module.A029_BURST == 6
+    assert client.calls[0]["burst"] == ops_module.A029_BURST
+    assert client.calls[0]["burst_interval"] == ops_module.A029_BURST_INTERVAL
+
+
+async def test_send_zone_consigne_repeats_the_identical_frame_within_a_burst(
+    fake_transport: FakeTransport,
+) -> None:
+    # The reference implementation sends the same message id several times, so a
+    # reply to any frame of the burst still matches; a new id per frame would
+    # discard it.
+    fake_transport.auto_reply = False
+    ops = _ops(fake_transport, self_addr=ADDR_SATELLITE_Z1)
+    data = BoilerData()
+    data.zones[1].mode = ZoneMode.AUTO
+    data.zones[1].auto_comfort = False
+
+    with pytest.raises(RequestTimeout):
+        await ops.send_zone_consigne(1, data, ambient=20.0, setpoint=19.0, timeout=0.02, retries=2, burst=3)
+
+    sent = fake_transport.sent
+    assert len(sent) == 6
+    assert [f.request_id for f in sent][0:3] == [sent[0].request_id] * 3
+    assert [f.request_id for f in sent][3:6] == [sent[3].request_id] * 3
+    assert sent[0].request_id != sent[3].request_id
+    assert len({f.payload for f in sent}) == 1
 
 
 async def test_read_satellite_info_uses_the_short_a029_reply_budget() -> None:

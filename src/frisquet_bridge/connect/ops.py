@@ -64,15 +64,18 @@ def _zone_mode_options(mode: ZoneMode, *, auto_comfort: bool, override: bool, bo
 ZONE_WRITE_REPEATS = 6
 ZONE_WRITE_INTERVAL = 1.5
 # The 0xa029/0xa02f exchange is the one lossy operation on this link: measured
-# over 37 days of live RF capture it answers ~20% of attempts, while the replies
-# that do arrive come back in 148-750 ms. The client default (5 s timeout, 3
-# attempts) therefore held the radio lock shared by every other client for up to
-# 15 s per lost send. Only the wait is trimmed here: a lost attempt now costs
-# 1.5 s. The three attempts are kept deliberately - with ~20% per-attempt
-# success, dropping one would cut consigne delivery by roughly a quarter, and
-# the scheduler re-sends on change and every ten minutes anyway.
+# over 37 days of live RF capture it answers only ~20% of *individual* frames -
+# memoryless, and independent of the hour, the payload and the attempt number -
+# while the replies that do arrive come back in 148-750 ms. The reference
+# implementation answers this by sending the identical frame (same message id)
+# up to six times in a quick burst. We do the same: two attempts of three frames
+# ~30 ms apart, with a reply window after each burst. Six frames per send matches
+# their budget; at ~20% per frame that puts a send near 74%, and a fully lost
+# send costs only 3 s of the shared radio lock.
 A029_TIMEOUT = 1.5
-A029_RETRIES = 3
+A029_RETRIES = 2
+A029_BURST = 3
+A029_BURST_INTERVAL = 0.03
 log = structlog.get_logger(__name__)
 _T = TypeVar("_T")
 
@@ -443,6 +446,8 @@ class BoilerOps:
         connect_compat: bool = False,
         timeout: float = A029_TIMEOUT,
         retries: int = A029_RETRIES,
+        burst: int = A029_BURST,
+        burst_interval: float = A029_BURST_INTERVAL,
     ) -> None:
         """Send a zone setpoint as a (virtual) satellite would (0xa02f write).
 
@@ -463,6 +468,8 @@ class BoilerOps:
                 payload=body,
                 timeout=timeout,
                 retries=retries,
+                burst=burst,
+                burst_interval=burst_interval,
             )
             decode_satellite_init_response(response.payload, data)
 
