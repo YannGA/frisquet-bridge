@@ -461,19 +461,23 @@ class BoilerOps:
     ) -> None:
         temp = max(-30.0, min(80.0, round(temperature * 10) / 10))
         body = SONDE_TEMP_PREFIX + encode_temp16(temp)
-        await self._tracked(
-            data,
-            "sonde_outside_temperature",
-            1200.0,
-            lambda: self._client.request(
+
+        async def request_and_decode() -> None:
+            response = await self._client.request(
                 control=0x01,
                 msg_type=MSG_INIT,
                 payload=body,
                 from_addr=0x20,
-            ),
-        )
+            )
+            if len(response.payload) >= 9: decode_clock(response.payload, data)
+
+        await self._tracked(data, "sonde_outside_temperature", 1200.0, request_and_decode)
         data.sonde.outside_temperature = temp
-        log.info("outside_temperature_written", temperature=temp)
+        log.info(
+            "outside_temperature_written",
+            temperature=temp,
+            boiler_clock=data.last_seen_date,
+        )
 
     async def send_zone_consigne(
         self,

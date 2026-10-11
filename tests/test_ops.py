@@ -113,6 +113,17 @@ async def test_init_writes_emit_expected_frame_and_update_model(fake_transport):
     assert data.boiler.outside_temperature == pytest.approx(8.0)
 
 
+async def test_outside_temperature_write_decodes_the_boiler_clock(fake_transport):
+    fake_transport.init_responses = {0x01: bytes.fromhex("082610051400322001")}
+    ops = _ops(fake_transport)
+    data = BoilerData()
+
+    await ops.write_outside_temperature(data, 12.3)
+
+    assert data.sonde.outside_temperature == pytest.approx(12.3)
+    assert data.last_seen_date == "2026-10-05 14:00:32"
+
+
 async def test_zone_writes_emit_expected_init_frame_and_update_model(fake_transport):
     ops = _ops(fake_transport)
     data = BoilerData()
