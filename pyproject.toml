@@ -38,7 +38,8 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-
-[tool.ruff.format]
-quote-style = "double"
+select = ["E", "F", "UP", "B", "SIM"]
+# Import layout is the coding conventions' business, not lint's: the conventions
+# prescribe combined single-line imports, which E401 bans and isort's I rules
+# split.
+ignore = ["E401"]
