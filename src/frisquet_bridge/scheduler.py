@@ -18,6 +18,13 @@ SATELLITE_INFO_INTERVAL = 600.0
 SATELLITE_INFO_TIMEOUT = 1.0
 OUTSIDE_TEMPERATURE_INTERVAL = 600.0
 OUTSIDE_TEMPERATURE_RETRY_INTERVAL = 60.0
+# A new outside temperature is still transmitted immediately, but at most once
+# per this interval: Home Assistant forwards every weather-station change, which
+# produced bursts of 43 sends/h on a sunny morning and crowded out the slower
+# satellite/consigne exchanges. Changes inside the window are kept (newest value
+# wins) and transmitted at the next allowed slot, so staleness is bounded by
+# this interval while the ten-minute keepalive still covers quiet periods.
+OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL = 300.0
 SLOW_INTERVAL = 3600.0
 
 _UNCHANGED = object()
@@ -38,6 +45,7 @@ class PollScheduler:
         satellite_info_timeout: float = SATELLITE_INFO_TIMEOUT,
         outside_temperature_interval: float = OUTSIDE_TEMPERATURE_INTERVAL,
         outside_temperature_retry_interval: float = OUTSIDE_TEMPERATURE_RETRY_INTERVAL,
+        outside_temperature_min_change_interval: float = OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL,
         enabled_zones: tuple[int, ...] = (1, 2, 3),
         on_update: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -52,7 +60,9 @@ class PollScheduler:
         self._satellite_info_timeout = satellite_info_timeout
         self._outside_temperature_interval = outside_temperature_interval
         self._outside_temperature_retry_interval = outside_temperature_retry_interval
+        self._outside_temperature_min_change_interval = outside_temperature_min_change_interval
         self._outside_temperature_due = 0.0
+        self._outside_temperature_last_sent: float | None = None
         self._outside_temperature_lock = asyncio.Lock()
         self._enabled_zones = enabled_zones
         self._on_update = on_update
@@ -64,24 +74,39 @@ class PollScheduler:
         self._wake.set()
 
     async def send_outside_temperature_now(self, temperature: float) -> bool:
-        """Store and immediately send a new desired outside temperature."""
+        """Store a new desired outside temperature and send it when allowed.
+
+        Returns True only when the value was actually transmitted. A change that
+        arrives inside the minimum change interval is kept and left for the run
+        loop to transmit at the next allowed slot.
+        """
         normalized = max(-30.0, min(80.0, round(temperature * 10) / 10))
-        return await self._attempt_outside_temperature(normalized)
+        return await self._attempt_outside_temperature(normalized, is_change=True)
 
     async def _attempt_outside_temperature(
         self,
         temperature: float | object = _UNCHANGED,
         *,
         only_if_due: bool = False,
+        is_change: bool = False,
     ) -> bool:
         if self._sonde_ops is None:
             return False
         async with self._outside_temperature_lock:
             loop = asyncio.get_running_loop()
-            if only_if_due and loop.time() < self._outside_temperature_due:
+            now = loop.time()
+            if only_if_due and now < self._outside_temperature_due:
                 return False
             if temperature is not _UNCHANGED:
                 self._data.sonde.outside_temperature = float(temperature)
+            if is_change and self._outside_temperature_last_sent is not None:
+                earliest = self._outside_temperature_last_sent + self._outside_temperature_min_change_interval
+                if now < earliest:
+                    # Rate-limit change-driven sends: keep the newest value and
+                    # let the run loop transmit it at the earliest allowed slot.
+                    self._outside_temperature_due = min(self._outside_temperature_due, earliest)
+                    self._wake.set()
+                    return False
             desired = self._data.sonde.outside_temperature
             if desired is None:
                 return False
@@ -89,8 +114,9 @@ class PollScheduler:
                 "outside_temperature",
                 lambda: self._sonde_ops.write_outside_temperature(self._data, desired),
             )
+            self._outside_temperature_last_sent = loop.time()
             interval = self._outside_temperature_interval if succeeded else self._outside_temperature_retry_interval
-            self._outside_temperature_due = asyncio.get_running_loop().time() + interval
+            self._outside_temperature_due = loop.time() + interval
             self._wake.set()
             return succeeded
 

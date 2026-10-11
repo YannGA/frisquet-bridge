@@ -9,6 +9,7 @@ import pytest
 from frisquet_bridge.model import BoilerData
 from frisquet_bridge.scheduler import (
     OUTSIDE_TEMPERATURE_INTERVAL,
+    OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL,
     OUTSIDE_TEMPERATURE_RETRY_INTERVAL,
     PollScheduler,
 )
@@ -222,6 +223,44 @@ async def test_scheduler_repushes_outside_temperature_even_when_unchanged() -> N
 def test_outside_temperature_uses_ten_minute_keepalive_and_one_minute_retry() -> None:
     assert OUTSIDE_TEMPERATURE_INTERVAL == 600.0
     assert OUTSIDE_TEMPERATURE_RETRY_INTERVAL == 60.0
+
+
+def test_outside_temperature_changes_are_capped_at_one_per_five_minutes() -> None:
+    assert OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL == 300.0
+
+
+async def test_outside_temperature_change_inside_window_is_deferred_not_dropped() -> None:
+    data = BoilerData()
+    sonde_ops = FakeSondeOps()
+    scheduler = PollScheduler(
+        None,
+        data,
+        poll_connect=False,
+        sonde_ops=sonde_ops,  # type: ignore[arg-type]
+        push_outside_temperature=True,
+        outside_temperature_interval=5.0,
+        outside_temperature_retry_interval=5.0,
+        outside_temperature_min_change_interval=0.2,
+    )
+
+    # the first change goes out immediately
+    assert await scheduler.send_outside_temperature_now(12.3) is True
+    assert sonde_ops.temperatures == [12.3]
+
+    # a second change inside the window is kept, not transmitted
+    assert await scheduler.send_outside_temperature_now(13.4) is False
+    assert sonde_ops.temperatures == [12.3]
+    assert data.sonde.outside_temperature == 13.4
+
+    # the run loop sends the newest value at the earliest allowed slot
+    task = asyncio.create_task(scheduler.run())
+    try:
+        await sonde_ops.wait_for_second_write()
+    finally:
+        scheduler.stop()
+        await task
+
+    assert sonde_ops.temperatures[:2] == [12.3, 13.4]
 
 
 async def test_failed_outside_temperature_write_retries_on_short_interval() -> None:
