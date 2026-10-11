@@ -54,11 +54,11 @@ class FrisquetClient:
 
     def __init__(
         self,
-        transport: Transport, # transport used to send and receive raw frames
+        transport: Transport,
         state: ProtocolState, # shared protocol ids (network / association / request)
         *,
-        self_addr: int = ADDR_CONNECT, # source address Connect transmits from
-        boiler_addr: int = ADDR_BOILER, # destination address of the boiler
+        self_addr: int = ADDR_CONNECT,
+        boiler_addr: int = ADDR_BOILER,
         lock: asyncio.Lock | None = None, # serialise exchanges across clients sharing one modem
     ) -> None:
         self._transport = transport
@@ -90,13 +90,13 @@ class FrisquetClient:
     async def request(
         self,
         *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
+        control: int, # request control byte, used to match an ACK or NACK
+        msg_type: int, # expected response message type
         payload: bytes, # message payload
-        from_addr: int | None = None, # source address (defaults to self_addr)
-        to_addr: int | None = None, # destination address (defaults to boiler_addr)
+        from_addr: int | None = None,
+        to_addr: int | None = None,
         timeout: float = _DEFAULT_TIMEOUT, # seconds to wait for each response
-        retries: int = _DEFAULT_RETRIES, # number of request attempts
+        retries: int = _DEFAULT_RETRIES,
         burst: int = 1, # identical frames sent per attempt
         burst_interval: float = 0.0, # seconds between frames of a burst
     ) -> Frame:
@@ -121,13 +121,13 @@ class FrisquetClient:
     async def _request_locked(
         self,
         *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
+        control: int, # request control byte, used to match an ACK or NACK
+        msg_type: int, # expected response message type
         payload: bytes, # message payload
-        from_addr: int, # source address
-        to_addr: int, # destination address
+        from_addr: int, # expected response source (the request's destination)
+        to_addr: int, # expected response destination
         timeout: float, # seconds to wait for each response
-        retries: int, # number of request attempts
+        retries: int,
         burst: int = 1, # identical frames sent per attempt
         burst_interval: float = 0.0, # seconds between frames of a burst
     ) -> Frame:
@@ -175,12 +175,12 @@ class FrisquetClient:
     async def send_oneway(
         self,
         *,
-        control: int, # RF control byte
-        msg_type: int, # message type to send
+        control: int, # request control byte, used to match an ACK or NACK
+        msg_type: int, # expected response message type
         payload: bytes, # message payload
-        from_addr: int | None = None, # source address (defaults to self_addr)
-        to_addr: int | None = None, # destination address (defaults to boiler_addr)
-        repeats: int = 1, # times to (re)send the frame
+        from_addr: int | None = None,
+        to_addr: int | None = None,
+        repeats: int = 1,
         interval: float = 0.0, # seconds between repeat sends
         on_attempt_outcome: Callable[[str, int | None], None] | None = None, # per-send outcome observer
     ) -> None:
@@ -214,7 +214,7 @@ class FrisquetClient:
 
     async def read_memory(
         self,
-        address: int, # memory address to read
+        address: int,
         size: int, # bytes to read
         **kwargs: object # extra FrisquetClient.request options
     ) -> bytes:
@@ -225,16 +225,16 @@ class FrisquetClient:
 
     async def _await_match(
         self,
-        queue: asyncio.Queue, # frames received on the transport subscription
+        queue: asyncio.Queue,
         *,
         from_addr: int, # expected response source (the request's destination)
         to_addr: int, # expected response destination
-        association_id: int, # expected association id
-        request_id: int, # expected request id
+        association_id: int,
+        request_id: int,
         control: int, # request control byte, used to match an ACK or NACK
         msg_type: int, # expected response message type
-        request_payload: bytes, # request payload, carried on AddressNotFound
-        timeout: float, # seconds to wait for a matching frame
+        request_payload: bytes, # payload of the rejected request
+        timeout: float, # seconds to wait for each response
     ) -> Frame | None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -280,7 +280,7 @@ class FrisquetClient:
 
     async def pair(
         self,
-        from_addr: int, # source address to reply from
+        from_addr: int, # expected response source (the request's destination)
         *, listen_window: float = 5.0, # seconds of silence that end the listen
     ) -> Association:
         """Listen for the boiler's association broadcast and reply.

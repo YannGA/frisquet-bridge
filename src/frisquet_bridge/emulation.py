@@ -31,7 +31,7 @@ class PassiveMirror:
 
     def __init__(
         self,
-        data: BoilerData, # aggregate state to mirror boiler responses into
+        data: BoilerData,
         *,
         boiler_addr: int = 0x80, # address of the boiler we mirror
         on_update: UpdateNotify | None = None,
@@ -77,7 +77,7 @@ class PassiveMirror:
 
     def _handle_satellite_report(
         self,
-        zone: int, # zone number the satellite belongs to
+        zone: int,
         frame: Frame, # satellite's MSG_INIT frame addressed to the boiler
     ) -> bool:
         if frame.payload[:2] == b"\xa1\x54":

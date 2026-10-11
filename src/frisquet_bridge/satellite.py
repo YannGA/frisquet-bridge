@@ -36,7 +36,7 @@ class VirtualSatellite:
 
     def __init__(
         self,
-        zone: int, # zone number this satellite owns
+        zone: int,
         ops: BoilerOps, # ops used to send the consigne
         data: BoilerData, # shared data model
         *,

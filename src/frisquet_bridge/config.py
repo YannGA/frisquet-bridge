@@ -369,7 +369,7 @@ def _load_identity(table: dict[str, object], field_name: str) -> DeviceIdentity:
 
 def _load_zone(
     table: dict[str, object],
-    field_name: str,
+    field_name: str, # dotted name used in error messages
     zone_number: int, # 1, 2 or 3; central_boiler is only valid on zone1
 ) -> ZoneConfig:
     _validate_keys(table, {"mode", "association_id"}, field_name)
@@ -404,7 +404,7 @@ def _validate_logging(config: LoggingConfig) -> None:
 
 def _validate_keys(
     table: dict[str, object],
-    allowed: set[str], # keys the table may contain
+    allowed: set[str],
     field_name: str, # dotted name used in error messages
 ) -> None:
     unknown = sorted(set(table) - allowed)

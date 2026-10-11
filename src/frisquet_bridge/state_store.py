@@ -75,8 +75,8 @@ def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
 
 
 def save_zone_state(
-    path: Path, # sidecar file to write
-    data: BoilerData, # zones to persist
+    path: Path, # sidecar file to read
+    data: BoilerData, # zones to populate in place
 ) -> None:
     'Atomically persist any learned zone metadata to ``path``.'
     try:
@@ -119,7 +119,7 @@ def load_protocol_request_ids(path: Path) -> dict[str, int]:
 
 
 def save_protocol_request_id(
-    path: Path, # sidecar file to write
+    path: Path, # sidecar file to read
     role: str, # "connect", "sonde" or "satellite_z1".."satellite_z3"
     request_id: int, # stored masked to one byte
 ) -> None:

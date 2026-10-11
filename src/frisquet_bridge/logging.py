@@ -50,7 +50,7 @@ class RawMessageRecorder:
     def record_frame(
         self,
         direction: str, # "tx" or "rx"
-        frame: Frame, # frame to describe
+        frame: Frame,
         raw: bytes, # exact bytes on the wire
         *,
         rssi: int | None = None, # signal strength, on received frames only
@@ -67,7 +67,7 @@ class RawMessageRecorder:
 
 
 def configure_logging(
-    config: LoggingConfig, # base logging configuration
+    config: LoggingConfig,
     *,
     level: str | None = None, # override for config.level
     log_format: str | None = None, # override for config.format (json or console)

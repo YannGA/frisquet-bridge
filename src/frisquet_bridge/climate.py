@@ -92,7 +92,7 @@ def _auto_active_preset(zone: ZoneState) -> str:
 
 
 def zone_hvac_action(
-    zone: ZoneState, # zone to classify
+    zone: ZoneState, # current zone state seeding the defaults
     boiler: BoilerState, # fallback when the zone reports no ambient/setpoint
 ) -> str | None:
     if zone.mode is None: return None
@@ -169,7 +169,7 @@ def apply_zone_intent(zone: ZoneState, intent: ZoneIntent) -> None:
 def _resolve_mode_flags(
     hvac: str, # canonical hvac mode ("off"/"auto"/"heat")
     preset: str, # canonical preset
-    zone: ZoneState, # current state, for an existing auto derogation
+    zone: ZoneState, # current zone state seeding the defaults
 ) -> tuple[ZoneMode, bool, bool, bool | None]:
     if hvac == HVAC_OFF: return ZoneMode.FROST, False, False, None
 
@@ -194,12 +194,12 @@ def _apply_target_temperature(
     temperature: float, # requested target, rounded to 0.1
     *,
     mode: ZoneMode, # resolved mode the target applies to
-    boost: bool, # whether the boost preset is active
+    boost: bool,
     override: bool, # whether an auto derogation is active
     auto_comfort: bool | None, # derogated level in auto, or None
-    comfort: float | None, # current comfort setpoint
-    reduced: float | None, # current reduced setpoint
-    frost: float | None, # current frost setpoint
+    comfort: float | None,
+    reduced: float | None,
+    frost: float | None,
 ) -> tuple[float | None, float | None, float | None]:
     temp = round(float(temperature), 1)
     if mode == ZoneMode.FROST: return comfort, reduced, temp

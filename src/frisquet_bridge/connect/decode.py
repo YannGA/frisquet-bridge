@@ -29,7 +29,7 @@ TEMP16_EXTREME_ABSENT = 258.1
 
 
 def memory_address(
-    base: int, # base block address
+    base: int,
     *,
     boiler_addr: int, # boiler address; 0x84 reads the alternate (BOILER_ALT_OFFSET) bank
 ) -> int:
@@ -101,8 +101,8 @@ def decode_daily_consumption(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_dhw_mode(
-    payload: bytes, # DHW mode block (0xa0fc)
-    data: BoilerData, # BoilerData to populate
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    data: BoilerData,
     *,
     frame_bits: int | None = None, # override the frame bits instead of masking the payload
 ) -> None:
@@ -142,9 +142,9 @@ def decode_satellite_init_response(payload: bytes, data: BoilerData) -> None:
 
 
 def decode_zone_read(
-    payload: bytes, # READ response or raw memory block
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    zone: int,
+    data: BoilerData,
 ) -> None:
     'Decode zone config from a READ response or raw memory block.'
     for start in (0, 1, 2):
@@ -157,9 +157,9 @@ def decode_zone_read(
 
 
 def decode_zone_init(
-    payload: bytes, # INIT (0xa154) frame or raw block
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    zone: int,
+    data: BoilerData,
 ) -> None:
     'Decode a zone INIT (0xa154) into zone state.'
     body = _zone_init_body(payload)
@@ -204,8 +204,8 @@ def decode_satellite_info(payload: bytes, data: BoilerData) -> None:
 
 def decode_zone_consigne(
     payload: bytes, # satellite setpoint INIT (0xa02f) frame
-    zone: int, # zone number to populate
-    data: BoilerData, # BoilerData to populate
+    zone: int,
+    data: BoilerData,
 ) -> None:
     """Decode a satellite's setpoint INIT (0xa02f write) into zone state.
 
@@ -229,7 +229,7 @@ _AUTO_SATELLITE_MODE = {(True, True): 3, (True, False): 5, (False, True): 2, (Fa
 
 
 def encode_satellite_mode(
-    zone: ZoneState, # ZoneState to encode
+    zone: ZoneState,
     *,
     connect_compat: bool = False, # XOR 0x20 to match the Connect-compatible encoding
 ) -> int:
@@ -258,10 +258,10 @@ def _zone_init_body(payload: bytes) -> bytes:
 
 
 def _decode_satellite_zone(
-    payload: bytes, # satellite info block
-    data: BoilerData, # BoilerData to populate
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    data: BoilerData,
     *,
-    zone: int, # zone number to populate
+    zone: int,
     offset: int, # byte offset of this zone's block
 ) -> None:
     zs = data.zones[zone]
@@ -346,8 +346,8 @@ def parse_boiler_event_push(payload: bytes) -> BoilerEventPush:
 
 
 def decode_memory_push(
-    payload: bytes, # MEMORY_PUSH (0x10) payload
-    data: BoilerData, # BoilerData to update for known blocks
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
+    data: BoilerData,
     *,
     boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
 ) -> MemoryPush:
@@ -358,7 +358,7 @@ def decode_memory_push(
 
 
 def memory_push_block_name(
-    address: int, # memory block address
+    address: int,
     *,
     boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
 ) -> str | None:
@@ -367,7 +367,7 @@ def memory_push_block_name(
 
 
 def describe_memory_push(
-    payload: bytes, # MEMORY_PUSH (0x10) payload
+    payload: bytes, # satellite setpoint INIT (0xa02f) frame
     *,
     boiler_addr: int = 0x80, # boiler address; 0x84 reads the alternate bank
 ) -> str:

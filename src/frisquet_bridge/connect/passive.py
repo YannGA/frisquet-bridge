@@ -90,8 +90,8 @@ def daily_consumption_addrs(boiler_addr: int) -> set[int]: return memory_addrs(A
 
 
 def read_addr_name(
-    addr: int, # memory address of the read
-    boiler_addr: int, # boiler's base address
+    addr: int,
+    boiler_addr: int,
 ) -> str | None:
     if addr in memory_addrs(ADDR_SENSORS, boiler_addr): return "sensors"
     if addr in memory_addrs(ADDR_SENSORS_APP, boiler_addr): return "sensors_app"
@@ -106,8 +106,8 @@ def sensor_addrs(boiler_addr: int) -> set[int]: return memory_addrs(ADDR_SENSORS
 
 
 def memory_addrs(
-    base: int, # base address of the value
-    boiler_addr: int, # boiler's base address
+    base: int,
+    boiler_addr: int,
 ) -> set[int]:
     return {base, memory_address(base, boiler_addr=boiler_addr)}
 
@@ -159,7 +159,7 @@ def _fmt(value: float | None) -> str: return "n/a" if value is None else f"{valu
 
 
 def _describe_zone_init(
-    frame: Frame, # candidate zone-init frame
+    frame: Frame,
     *, allow_length_prefixed: bool = False, # accept the short length-prefixed write form
 ) -> str | None:
     zone = _frame_zone(frame)

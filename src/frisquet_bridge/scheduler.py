@@ -34,10 +34,10 @@ class PollScheduler:
     def __init__(
         self,
         ops: BoilerOps | None, # Connect ops for boiler reads, or None when unavailable
-        data: BoilerData, # aggregate state to populate
+        data: BoilerData,
         *,
         poll_connect: bool = True, # whether to poll the boiler over Connect
-        sonde_ops: BoilerOps | None = None, # ops used to push the outside temperature
+        sonde_ops: BoilerOps | None = None,
         push_outside_temperature: bool = False, # whether to transmit outside-temperature changes
         sensor_interval: float = SENSOR_INTERVAL, # seconds between sensor reads
         poll_satellite_info: bool = True, # whether to re-read satellite info periodically
