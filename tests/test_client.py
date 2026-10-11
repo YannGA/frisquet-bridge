@@ -8,15 +8,8 @@ import pytest
 
 from frisquet_bridge.connect.client import AddressNotFound, FrisquetClient, RequestTimeout
 from frisquet_bridge.connect.state import ProtocolState
-from frisquet_bridge.frame import (
-    ADDR_BOILER,
-    ADDR_BROADCAST,
-    ADDR_CONNECT,
-    MSG_ADDRESS_NOT_FOUND,
-    MSG_ASSOCIATION,
-    MSG_INIT,
-    MSG_READ,
-    Frame,)
+from frisquet_bridge.frame import (ADDR_BOILER, ADDR_BROADCAST, ADDR_CONNECT, MSG_ADDRESS_NOT_FOUND, MSG_ASSOCIATION, MSG_INIT, MSG_READ,
+    Frame)
 from frisquet_bridge.transport.base import TransportError
 from tests.helpers import FakeTransport
 

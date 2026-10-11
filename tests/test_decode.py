@@ -2,21 +2,9 @@
 
 import pytest
 
-from frisquet_bridge.connect.decode import (
-    BOILER_EVENT_KIND_CLEAR,
-    BOILER_EVENT_KIND_SET,
-    decode_clock,
-    decode_consumption,
-    decode_daily_consumption,
-    decode_dhw_mode,
-    decode_satellite_info,
-    decode_sensors,
-    decode_zone_consigne,
-    decode_zone_init,
-    describe_boiler_event,
-    encode_satellite_mode,
-    parse_boiler_event_push,
-    parse_memory_push,)
+from frisquet_bridge.connect.decode import (BOILER_EVENT_KIND_CLEAR, BOILER_EVENT_KIND_SET, decode_clock, decode_consumption,
+    decode_daily_consumption, decode_dhw_mode, decode_satellite_info, decode_sensors, decode_zone_consigne, decode_zone_init,
+    describe_boiler_event, encode_satellite_mode, parse_boiler_event_push, parse_memory_push)
 from frisquet_bridge.connect.passive import PassiveReadTracker
 from frisquet_bridge.frame import MSG_INIT, MSG_READ, Frame
 from frisquet_bridge.model import BoilerData, DhwMode, ZoneMode, ZoneSource, ZoneState
@@ -25,6 +13,8 @@ from frisquet_bridge.model import BoilerData, DhwMode, ZoneMode, ZoneSource, Zon
 SENSORS_CONNECT = bytes.fromhex('38028802b1012004f604f6020500000000000000001a000005015900000000000000000000011104f604f600c600c600c6005000000000050a')
 SATELLITE_INFO_PUSH = bytes.fromhex('2a050a000026062216274421010111005000100000000004f6000000000000000004f60000000000000000')
 ZONE_INIT_PUSH = bytes.fromhex('a1540015a15400183091821e08100000e0ffffffff00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffffff')
+CONSUMPTION_DAILY_CAPTURE = '3810014b19143c4b0f14504b0f1450070200640005000000000000000000000000803100000000000000000000000000000184138001101080'
+SENSORS_APP_CAPTURE = '3802720296011a04f604f601f800000000000000001a0000050159000000000000000000000000000000000000000000000000000062846a39'
 # max-temp experiment: clear then set, all-zero tail (no boost bit).
 BOILER_EVENT_CLEAR = bytes.fromhex("020a8031ac553a6a00000000000000000000000000")
 BOILER_EVENT_SET = bytes.fromhex("010a8031ad553a6a00000000000000000000000000")
@@ -109,38 +99,10 @@ def test_passive_read_tracker_matches_read_responses():
     consumption = bytearray(57)
     consumption[1:3] = (123).to_bytes(2, "big", signed=True)
     consumption[3:5] = (456).to_bytes(2, "big", signed=True)
-    cases = [
-        (0x9C, 0x34, "7a34001c", bytes(consumption), "consumption", ("dhw=123", "heating=456")),
-        (
-            0xEA,
-            0x80,
-            "7a18001c",
-            bytes.fromhex(
-                "3810014b19143c4b0f14504b0f145007020064000500000000000000"
-                "0000000000803100000000000000000000000000000184138001101080"
-            ),
-            "daily_consumption",
-            ("dhw=5", "heating=0"),
-        ),
-        (
-            0x9C,
-            0x38,
-            "79e0001c",
-            bytes(57),
-            "sensors",
-            ("dhw=0.0°C", "cdc=0.0°C", "pressure=0.0bar"),
-        ),
-        (
-            0xEA,
-            0x74,
-            "79fc001c",
-            bytes.fromhex(
-                "3802720296011a04f604f601f800000000000000001a00000501590000"
-                "00000000000000000000000000000000000000000000000062846a39"
-            ),
-            "sensors_app",
-            ("dhw=62.6°C", "cdc=66.2°C", "pressure=1.3bar"),
-        )]
+    cases = [(0x9C, 0x34, "7a34001c", bytes(consumption), "consumption", ("dhw=123", "heating=456")),
+        (0xEA, 0x80, "7a18001c", bytes.fromhex(CONSUMPTION_DAILY_CAPTURE), "daily_consumption", ("dhw=5", "heating=0")),
+        (0x9C, 0x38, "79e0001c", bytes(57), "sensors", ("dhw=0.0°C", "cdc=0.0°C", "pressure=0.0bar")),
+        (0xEA, 0x74, "79fc001c", bytes.fromhex(SENSORS_APP_CAPTURE), "sensors_app", ("dhw=62.6°C", "cdc=66.2°C", "pressure=1.3bar"))]
     for assoc, req_id, req_payload, resp_payload, name, fields in cases:
         request = Frame(to_addr=128, from_addr=126, association_id=assoc, request_id=req_id, control=1, msg_type=MSG_READ,
             payload=bytes.fromhex(req_payload))

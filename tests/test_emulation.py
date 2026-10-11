@@ -15,18 +15,8 @@ async def test_passive_mirror_learns_zone_config():
     mirror = PassiveMirror(data, boiler_addr=0x80, on_zone_config=lambda: persisted.append(True))
 
     # Satellite z1 reporting its 0xa154 config to the boiler, as captured.
-    broadcast = Frame(
-        to_addr=0x80,
-        from_addr=0x08,
-        association_id=0xC0,
-        request_id=0x70,
-        control=0x7E,
-        msg_type=MSG_INIT,
-        payload=bytes.fromhex(
-            "a1540015a154001830"
-            "91821e05250000e0ffffffff00e0ffffff7f00e0ffffff7f"
-            "00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffffff"
-        ))
+    broadcast = Frame(to_addr=0x80, from_addr=0x08, association_id=0xC0, request_id=0x70, control=0x7E, msg_type=MSG_INIT,
+        payload=bytes.fromhex("a1540015a15400183091821e05250000e0ffffffff00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffffff"))
     await mirror.handle(_received(broadcast))
     zone = data.zones[1]
     assert zone.mode == ZoneMode.AUTO

@@ -2,14 +2,8 @@
 
 import pytest
 
-from frisquet_bridge.boiler_profile import (
-    SIMPLE_DEFAULT_COMFORT_TEMPERATURE,
-    SIMPLE_DEFAULT_FROST_TEMPERATURE,
-    SIMPLE_DEFAULT_REDUCED_TEMPERATURE,
-    apply_simple_command,
-    central_boiler_consigne,
-    simple_consigne,
-    simple_target_temperature,)
+from frisquet_bridge.boiler_profile import (SIMPLE_DEFAULT_COMFORT_TEMPERATURE, SIMPLE_DEFAULT_FROST_TEMPERATURE,
+    SIMPLE_DEFAULT_REDUCED_TEMPERATURE, apply_simple_command, central_boiler_consigne, simple_consigne, simple_target_temperature)
 from frisquet_bridge.climate import HVAC_AUTO, HVAC_HEAT, PRESET_ECO
 from frisquet_bridge.model import ZoneMode, ZoneState
 

@@ -2,20 +2,8 @@
 
 import pytest
 
-from frisquet_bridge.climate import (
-    HVAC_AUTO,
-    HVAC_HEAT,
-    HVAC_OFF,
-    PRESET_BOOST,
-    PRESET_COMFORT,
-    PRESET_ECO,
-    PRESET_NONE,
-    ClimateError,
-    resolve_zone_intent,
-    zone_hvac_action,
-    zone_hvac_mode,
-    zone_preset,
-    zone_target_temperature,)
+from frisquet_bridge.climate import (HVAC_AUTO, HVAC_HEAT, HVAC_OFF, PRESET_BOOST, PRESET_COMFORT, PRESET_ECO, PRESET_NONE, ClimateError,
+    resolve_zone_intent, zone_hvac_action, zone_hvac_mode, zone_preset, zone_target_temperature)
 from frisquet_bridge.model import BoilerState, ZoneMode, ZoneState
 
 
@@ -26,12 +14,7 @@ def _zone(**kwargs):
 
 
 def test_zone_hvac_mode_and_preset_mapping():
-    for mode, expected in (
-        (ZoneMode.FROST, HVAC_OFF),
-        (ZoneMode.AUTO, HVAC_AUTO),
-        (ZoneMode.COMFORT, HVAC_HEAT),
-        (ZoneMode.REDUCED, HVAC_HEAT),
-    ):
+    for mode, expected in ((ZoneMode.FROST, HVAC_OFF), (ZoneMode.AUTO, HVAC_AUTO), (ZoneMode.COMFORT, HVAC_HEAT), (ZoneMode.REDUCED, HVAC_HEAT)):
         assert zone_hvac_mode(_zone(mode=mode)) == expected
 
     assert zone_preset(_zone(mode=ZoneMode.FROST)) == PRESET_NONE

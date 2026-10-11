@@ -14,14 +14,8 @@ from frisquet_bridge.transport.base import ReceivedFrame, Transport, TransportEr
 DEFAULT_ZONE_SCHEDULE_BYTES = bytes.fromhex('00e0ffffffff00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffff7f00e0ffffffff')
 
 
-def make_zone_config_body(
-    *,
-    comfort: float = 20.0,
-    reduced: float = 17.0,
-    frost: float = 7.0,
-    mode: ZoneMode = ZoneMode.AUTO,
-    mode_options: int = ZONE_MODE_OPTIONS_DEFAULT,
-) -> bytes:
+def make_zone_config_body(*, comfort: float = 20.0, reduced: float = 17.0, frost: float = 7.0, mode: ZoneMode = ZoneMode.AUTO,
+    mode_options: int = ZONE_MODE_OPTIONS_DEFAULT) -> bytes:
     return bytes((encode_temp8(comfort), encode_temp8(reduced), encode_temp8(frost), mode.byte, mode_options, 0)) + DEFAULT_ZONE_SCHEDULE_BYTES
 
 
@@ -37,14 +31,8 @@ def seed_zone_metadata(data: BoilerData, zone: int = 1) -> None:
 class FakeTransport(Transport):
     'In-memory transport for protocol client tests.'
 
-    def __init__(
-        self,
-        *,
-        auto_reply: bool = True,
-        send_raises: TransportError | None = None,
-        read_responses: dict[int, bytes] | None = None,
-        init_responses: dict[int, bytes] | None = None,
-    ) -> None:
+    def __init__(self, *, auto_reply: bool = True, send_raises: TransportError | None = None,
+        read_responses: dict[int, bytes] | None = None, init_responses: dict[int, bytes] | None = None) -> None:
         self.network_ids = []
         self.sent = []
         self._subs = set()

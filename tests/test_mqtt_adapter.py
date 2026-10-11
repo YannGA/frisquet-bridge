@@ -235,20 +235,12 @@ async def test_discovery_topics_and_entity_metadata(adapter, tmp_path):
     client = FakeMqttClient()
     await mqtt.publish_discovery(client)
     payloads = {topic: payload for topic, payload, _retain in client.published}
-    for topic in (
-        "homeassistant/switch/frisquet_bridge/central_heat_demand/config",
-        "homeassistant/number/frisquet_bridge/central_setpoint/config",
-        "homeassistant/number/frisquet_bridge/central_demand_on_delta/config",
-        "homeassistant/number/frisquet_bridge/central_demand_off_margin/config",
-        "homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config",
-        "homeassistant/sensor/frisquet_bridge/zone1_flow_setpoint_temperature/config",
-    ):
+    for topic in ("homeassistant/switch/frisquet_bridge/central_heat_demand/config", "homeassistant/number/frisquet_bridge/central_setpoint/config",
+        "homeassistant/number/frisquet_bridge/central_demand_on_delta/config", "homeassistant/number/frisquet_bridge/central_demand_off_margin/config",
+        "homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config", "homeassistant/sensor/frisquet_bridge/zone1_flow_setpoint_temperature/config"):
         assert payloads[topic]
-    for topic in (
-        "homeassistant/climate/frisquet_bridge/zone1_climate/config",
-        "homeassistant/sensor/frisquet_bridge/central_flow_temperature/config",
-        "homeassistant/sensor/frisquet_bridge/central_flow_setpoint_temperature/config",
-    ):
+    for topic in ("homeassistant/climate/frisquet_bridge/zone1_climate/config", "homeassistant/sensor/frisquet_bridge/central_flow_temperature/config",
+        "homeassistant/sensor/frisquet_bridge/central_flow_setpoint_temperature/config"):
         assert payloads[topic] == ""
 
 

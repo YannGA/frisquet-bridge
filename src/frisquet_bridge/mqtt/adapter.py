@@ -3,33 +3,21 @@
 from __future__ import annotations
 
 import json, time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import aiomqtt, structlog
 
-from frisquet_bridge.boiler_profile import (
-    SIMPLE_HVAC_MODES,
-    SIMPLE_PRESET_MODES,
-    apply_simple_command,
-    simple_hvac_mode,
-    simple_preset,
-    simple_target_temperature,)
-from frisquet_bridge.climate import (
-    HVAC_MODES,
-    PRESET_BOOST,
-    PRESET_MODES,
-    apply_zone_intent,
-    resolve_zone_intent,
-    zone_hvac_action,
-    zone_hvac_mode,
-    zone_preset,
-    zone_target_temperature,)
+from frisquet_bridge.boiler_profile import (SIMPLE_HVAC_MODES, SIMPLE_PRESET_MODES, apply_simple_command, simple_hvac_mode, simple_preset,
+    simple_target_temperature)
+from frisquet_bridge.climate import (HVAC_MODES, PRESET_BOOST, PRESET_MODES, apply_zone_intent, resolve_zone_intent, zone_hvac_action, zone_hvac_mode,
+    zone_preset, zone_target_temperature)
 from frisquet_bridge.config import BridgeConfig
 from frisquet_bridge.connect.ops import BoilerOps
 from frisquet_bridge.model import DHW_SELECTABLE_MODES, BoilerData, BoilerStatus, DhwMode
 from frisquet_bridge.satellite import VirtualSatellite
+from frisquet_bridge.types import TemperatureWriter, UpdateNotify
 
 log = structlog.get_logger(__name__)
 
@@ -46,7 +34,7 @@ _RETIRED_ZONE_ENTITIES = tuple(((component, f'zone{zone}_{suffix}') for zone in 
     suffix in (('select', 'mode'), ('switch', 'boost'), ('select', 'override'), ('sensor', 'schedule_raw'))))
 _RETIRED_CENTRAL_FLOW_ENTITIES = (('sensor', 'central_flow_temperature'), ('sensor', 'central_flow_setpoint_temperature'))
 
-_LABELS = {
+_LABELS = {  # chkstyle: ignore-node
     "en": {
         "dhw_temperature": "Boiler DHW temperature",
         "dhw_instant_temperature": "Boiler DHW instant temperature",
@@ -104,7 +92,7 @@ _LABELS = {
         "rf_operation": "RF {operation}",
     }}
 
-_DHW_LABELS = {
+_DHW_LABELS = {  # chkstyle: ignore-node
     "en": {mode: mode.value for mode in DhwMode},
     "fr": {
         DhwMode.MAX: "Max",
@@ -134,7 +122,7 @@ class EntitySpec:
     suggested_display_precision: int | None = None
 
 
-BOILER_SENSOR_ENTITIES = (
+BOILER_SENSOR_ENTITIES = (  # chkstyle: ignore-node
     EntitySpec(
         "sensor",
         "dhw_temperature",
@@ -252,15 +240,15 @@ class MqttAdapter:
 
     def __init__(
         self,
-        cfg: BridgeConfig, # bridge configuration
-        data: BoilerData, # live boiler, zone and RF state
-        ops: BoilerOps | None, # connect ops for boiler/zone writes, if paired
+        cfg: BridgeConfig,
+        data: BoilerData,
+        ops: BoilerOps | None,
         *,
-        sonde_ops: BoilerOps | None = None, # connect ops for the outside sensor, if paired
-        outside_temperature_writer: Callable[[float], Awaitable[bool]] | None = None, # alternative outside-sensor writer
-        virtual_satellites: dict[int, VirtualSatellite] | None = None, # virtual zone -> satellite
-        on_state_change: Callable[[], Awaitable[None]] | None = None, # republish state after a change
-        on_persist_state: Callable[[], None] | None = None, # persist state after a change
+        sonde_ops: BoilerOps | None = None,
+        outside_temperature_writer: TemperatureWriter | None = None, # alternative outside-sensor writer
+        virtual_satellites: dict[int, VirtualSatellite] | None = None,
+        on_state_change: UpdateNotify | None = None,
+        on_persist_state: Callable[[], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._data = data
@@ -344,9 +332,9 @@ class MqttAdapter:
 
     async def _publish_discovery_payload(
         self,
-        client: aiomqtt.Client, # client to publish through
-        component: str, # HA component, e.g. "sensor"
-        entity_id: str, # entity id under the component
+        client: aiomqtt.Client,
+        component: str,
+        entity_id: str,
         payload: dict[str, Any], # discovery config payload
     ) -> bool:
         key = f"{component}.{entity_id}"
@@ -355,20 +343,14 @@ class MqttAdapter:
         self._published.add(key)
         return True
 
-    async def _clear_discovery(
-        self,
-        client: aiomqtt.Client, # client to publish through
-        component: str, # HA component
-        entity_id: str, # entity id under the component
-    ) -> None:
+    async def _clear_discovery(self, client: aiomqtt.Client, component: str, entity_id: str) -> None:
         await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
 
     async def _publish_central_discovery(self, client: aiomqtt.Client) -> int:
         count = 0
         device = self._device_block()
-        switch_payload = {'name': self._label('central_heat_demand'), 'unique_id': f'{DEVICE_ID}_central_heat_demand',
-            'state_topic': self._topic('central/demand'), 'command_topic': self._topic('central/demand/set'), 'payload_on': 'ON',
-            'payload_off': 'OFF', 'device': device}
+        switch_payload = dict(name=self._label('central_heat_demand'), unique_id=f'{DEVICE_ID}_central_heat_demand', state_topic=self._topic('central/demand'),
+            command_topic=self._topic('central/demand/set'), payload_on='ON', payload_off='OFF', device=device)
         self._add_availability(switch_payload)
         if await self._publish_discovery_payload(client, "switch", "central_heat_demand", switch_payload): count += 1
 
@@ -454,26 +436,14 @@ class MqttAdapter:
                 prefix = f"z{zone}"
                 modes = SIMPLE_HVAC_MODES if self._is_simple_zone(zone) else HVAC_MODES
                 preset_modes = SIMPLE_PRESET_MODES if self._is_simple_zone(zone) else MQTT_PRESET_MODES
-                climate_payload = {
-                    "name": self._label("zone_heating", zone=zone),
-                    "unique_id": f"{DEVICE_ID}_{entity_id}",
-                    "modes": list(modes),
-                    "mode_state_topic": self._topic(f"{prefix}/mode"),
-                    "preset_modes": list(preset_modes),
-                    "preset_mode_state_topic": self._topic(f"{prefix}/preset"),
-                    "action_topic": self._topic(f"{prefix}/action"),
-                    "current_temperature_topic": self._topic(f"{prefix}/currentTemperature"),
-                    "temperature_state_topic": self._topic(f"{prefix}/targetTemperature"),
-                    "min_temp": CLIMATE_MIN_TEMP,
-                    "max_temp": CLIMATE_MAX_TEMP,
-                    "temp_step": CLIMATE_TEMP_STEP,
-                    "temperature_unit": "C",
-                    "precision": 0.1,
-                    "device": self._device_block()}
+                climate_payload = dict(name=self._label("zone_heating", zone=zone), unique_id=f"{DEVICE_ID}_{entity_id}", modes=list(modes),
+                    mode_state_topic=self._topic(f"{prefix}/mode"), preset_modes=list(preset_modes), preset_mode_state_topic=self._topic(f"{prefix}/preset"),
+                    action_topic=self._topic(f"{prefix}/action"), current_temperature_topic=self._topic(f"{prefix}/currentTemperature"),
+                    temperature_state_topic=self._topic(f"{prefix}/targetTemperature"), min_temp=CLIMATE_MIN_TEMP, max_temp=CLIMATE_MAX_TEMP,
+                    temp_step=CLIMATE_TEMP_STEP, temperature_unit="C", precision=0.1, device=self._device_block())
                 if not self._is_read_only_satellite_zone(zone):
-                    climate_payload.update({'mode_command_topic': self._topic(f'{prefix}/mode/set'),
-                        'preset_mode_command_topic': self._topic(f'{prefix}/preset/set'),
-                        'temperature_command_topic': self._topic(f'{prefix}/targetTemperature/set')})
+                    climate_payload.update(mode_command_topic=self._topic(f'{prefix}/mode/set'), preset_mode_command_topic=self._topic(f'{prefix}/preset/set'),
+                        temperature_command_topic=self._topic(f'{prefix}/targetTemperature/set'))
                 self._add_availability(climate_payload)
                 await client.publish(self._discovery_topic("climate", entity_id), json.dumps(climate_payload), retain=True)
                 self._published.add(key)
@@ -513,22 +483,13 @@ class MqttAdapter:
         b = self._data.boiler
         mapping = {}
         if self._boiler_entities_enabled():
-            mapping.update(
-                {
-                    "boiler/dhwTemperature": _fmt(b.dhw_temperature),
-                    "boiler/dhwInstantTemperature": _fmt(b.dhw_instant_temperature),
-                    "boiler/cdcTemperature": _fmt(b.cdc_temperature),
-                    "boiler/cdcSafetyTemperature": _fmt(b.cdc_safety_temperature),
-                    "boiler/flueTemperature": _fmt(b.flue_temperature),
-                    "boiler/dhwInstantPower": _fmt(b.dhw_power),
-                    "boiler/heatingInstantPower": _fmt(b.heating_power),
-                    "boiler/pressure": _fmt(b.pressure),
-                    "boiler/dhwConsumption": _fmt_int(b.dhw_consumption),
-                    "boiler/heatingConsumption": _fmt_int(b.heating_consumption),
-                    "boiler/dailyDhwConsumption": _fmt_int(b.daily_dhw_consumption),
-                    "boiler/dailyHeatingConsumption": _fmt_int(b.daily_heating_consumption),
-                    "boiler/status": self._boiler_status_label(b.status),
-                })
+            mapping.update({"boiler/dhwTemperature": _fmt(b.dhw_temperature), "boiler/dhwInstantTemperature": _fmt(b.dhw_instant_temperature),
+                "boiler/cdcTemperature": _fmt(b.cdc_temperature), "boiler/cdcSafetyTemperature": _fmt(b.cdc_safety_temperature),
+                "boiler/flueTemperature": _fmt(b.flue_temperature), "boiler/dhwInstantPower": _fmt(b.dhw_power),
+                "boiler/heatingInstantPower": _fmt(b.heating_power), "boiler/pressure": _fmt(b.pressure),
+                "boiler/dhwConsumption": _fmt_int(b.dhw_consumption), "boiler/heatingConsumption": _fmt_int(b.heating_consumption),
+                "boiler/dailyDhwConsumption": _fmt_int(b.daily_dhw_consumption), "boiler/dailyHeatingConsumption": _fmt_int(b.daily_heating_consumption),
+                "boiler/status": self._boiler_status_label(b.status)})
         if self._boiler_entities_enabled():
             dhw_mode = self._visible_dhw_mode()
             mapping["boiler/dhwMode"] = self._dhw_label(dhw_mode) if dhw_mode else None
@@ -636,12 +597,7 @@ class MqttAdapter:
                 return
             if self._on_change: await self._on_change()
 
-    async def handle_message(
-        self,
-        client: aiomqtt.Client, # client to publish through
-        topic: str, # MQTT topic the message arrived on
-        payload: str, # raw message body
-    ) -> None:
+    async def handle_message(self, client: aiomqtt.Client, topic: str, payload: str) -> None:
         body = payload.strip()
         if topic == "homeassistant/status":
             if body == "online":
@@ -671,9 +627,9 @@ class MqttAdapter:
 
     async def _handle_connect_zone_command(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         command: str, # mode, preset or targetTemperature
-        payload: str, # raw command value
+        payload: str,
     ) -> None:
         assert self._ops is not None
         if command == "mode": await self._ops.apply_zone_climate(zone, self._data, hvac_mode=payload)
@@ -683,9 +639,9 @@ class MqttAdapter:
 
     async def _handle_virtual_zone_command(
         self,
-        zone: int, # zone number (1-3)
+        zone: int,
         command: str, # mode, preset, targetTemperature or reportedAmbient
-        payload: str, # raw command value
+        payload: str,
     ) -> None:
         satellite = self._virtual[zone]
         zs = self._data.zones[zone]
