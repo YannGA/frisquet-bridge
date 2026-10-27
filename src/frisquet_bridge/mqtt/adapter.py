@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import json, time
+import asyncio, json, re, time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 import aiomqtt, structlog
 
-from frisquet_bridge.boiler_profile import (SIMPLE_HVAC_MODES, SIMPLE_PRESET_MODES, apply_simple_command, simple_hvac_mode, simple_preset,
-    simple_target_temperature)
+from frisquet_bridge.boiler_profile import (FLOW_CURVE_FLOW, SIMPLE_HVAC_MODES, SIMPLE_PRESET_MODES, apply_simple_command, flow_temp_max,
+    flow_temp_outdoor, simple_hvac_mode, simple_preset, simple_target_temperature)
 from frisquet_bridge.climate import (HVAC_MODES, PRESET_BOOST, PRESET_MODES, apply_zone_intent, resolve_zone_intent, zone_hvac_action, zone_hvac_mode,
     zone_preset, zone_target_temperature)
-from frisquet_bridge.config import BridgeConfig
+from frisquet_bridge.config import ZONE1_ONLY_MODES, BridgeConfig
 from frisquet_bridge.connect.ops import BoilerOps
-from frisquet_bridge.model import DHW_SELECTABLE_MODES, BoilerData, BoilerStatus, DhwMode
+from frisquet_bridge.model import (DHW_SELECTABLE_MODES, SONDE_MAX_TEMPERATURE, SONDE_MIN_TEMPERATURE, BoilerData, BoilerStatus, DhwMode,
+    daily_consumption_reset)
 from frisquet_bridge.satellite import VirtualSatellite
 from frisquet_bridge.types import TemperatureWriter, UpdateNotify
 
@@ -29,10 +29,11 @@ DHW_PENDING_SECONDS = 20.0
 
 MQTT_PRESET_MODES = tuple(preset for preset in PRESET_MODES if preset != PRESET_BOOST)
 
-# Retired from the MQTT surface; clear their retained discovery so Home Assistant drops them.
-_RETIRED_ZONE_ENTITIES = tuple(((component, f'zone{zone}_{suffix}') for zone in (1, 2, 3) for component,
-    suffix in (('select', 'mode'), ('switch', 'boost'), ('select', 'override'), ('sensor', 'schedule_raw'))))
-_RETIRED_CENTRAL_FLOW_ENTITIES = (('sensor', 'central_flow_temperature'), ('sensor', 'central_flow_setpoint_temperature'))
+_Config = dict[str, Any] # one discovery component, or the device block
+DEVICE_TOPIC = f"homeassistant/device/{DEVICE_ID}/config"
+# Discovery topics from before the bridge used device discovery, one per entity.
+_LEGACY_DISCOVERY = re.compile(rf"homeassistant/(\w+)/{DEVICE_ID}/(\w+)/config")
+_PROFILE_COMMANDS = {"central": {"demand", "setpoint", "demandOnDelta", "demandOffMargin"}, "flow": {"demand", "target"}}
 
 _LABELS = {  # chkstyle: ignore-node
     "en": {
@@ -57,6 +58,9 @@ _LABELS = {  # chkstyle: ignore-node
         "central_demand_off_margin": "Central boiler off margin",
         "central_boiler_status": "Central boiler status",
         "central_outside_temperature": "Central boiler outside temperature",
+        "flow_demand": "Flow temperature heating",
+        "flow_target": "Flow temperature target",
+        "flow_outside_temperature": "Virtual outside temperature",
         "zone_heating": "Zone {zone} heating",
         "zone_reported_ambient": "Zone {zone} reported room temperature",
         "zone_flow_temperature": "Zone {zone} flow temperature",
@@ -85,6 +89,9 @@ _LABELS = {  # chkstyle: ignore-node
         "central_demand_off_margin": "Chaudière centrale marge arrêt",
         "central_boiler_status": "Chaudière centrale état chaudière",
         "central_outside_temperature": "Chaudière centrale température extérieure",
+        "flow_demand": "Chauffage par température de départ",
+        "flow_target": "Consigne température de départ",
+        "flow_outside_temperature": "Température extérieure virtuelle",
         "zone_heating": "Zone {zone} chauffage",
         "zone_reported_ambient": "Zone {zone} température ambiante déclarée",
         "zone_flow_temperature": "Zone {zone} température départ",
@@ -107,132 +114,27 @@ _BOILER_STATUS_LABELS = {'en': {status: status.value for status in BoilerStatus}
     'fr': {BoilerStatus.STANDBY: 'Veille', BoilerStatus.RUNNING: 'En marche', BoilerStatus.HEATING_OFF: 'Chauffage arrêté'}}
 
 
-@dataclass(frozen=True, slots=True)
-class EntitySpec:
-    component: str
-    entity_id: str
-    label_key: str
-    state_suffix: str
-    device_class: str | None = None
-    unit: str | None = None
-    command: bool = False
-    options: tuple[str, ...] | None = None
-    state_class: str | None = None
-    entity_category: str | None = None
-    suggested_display_precision: int | None = None
-
-
-BOILER_SENSOR_ENTITIES = (  # chkstyle: ignore-node
-    EntitySpec(
-        "sensor",
-        "dhw_temperature",
-        "dhw_temperature",
-        "boiler/dhwTemperature",
-        "temperature",
-        "°C",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "dhw_instant_temperature",
-        "dhw_instant_temperature",
-        "boiler/dhwInstantTemperature",
-        "temperature",
-        "°C",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "cdc_temperature",
-        "cdc_temperature",
-        "boiler/cdcTemperature",
-        "temperature",
-        "°C",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "cdc_safety_temperature",
-        "cdc_safety_temperature",
-        "boiler/cdcSafetyTemperature",
-        "temperature",
-        "°C",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "flue_temperature",
-        "flue_temperature",
-        "boiler/flueTemperature",
-        "temperature",
-        "°C",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "dhw_power",
-        "dhw_power",
-        "boiler/dhwInstantPower",
-        "power",
-        "kW",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor",
-        "heating_power",
-        "heating_power",
-        "boiler/heatingInstantPower",
-        "power",
-        "kW",
-        state_class="measurement",
-        suggested_display_precision=1,
-    ),
-    EntitySpec(
-        "sensor", "pressure", "pressure", "boiler/pressure", "pressure", "bar", state_class="measurement", suggested_display_precision=1
-    ),
-    EntitySpec(
-        "sensor", "dhw_consumption", "dhw_consumption", "boiler/dhwConsumption", "energy", "kWh", state_class="total_increasing"
-    ),
-    EntitySpec(
-        "sensor",
-        "heating_consumption",
-        "heating_consumption",
-        "boiler/heatingConsumption",
-        "energy",
-        "kWh",
-        state_class="total_increasing",
-    ),
-    EntitySpec(
-        "sensor",
-        "daily_dhw_consumption",
-        "daily_dhw_consumption",
-        "boiler/dailyDhwConsumption",
-        "energy",
-        "kWh",
-        state_class="measurement",
-    ),
-    EntitySpec(
-        "sensor",
-        "daily_heating_consumption",
-        "daily_heating_consumption",
-        "boiler/dailyHeatingConsumption",
-        "energy",
-        "kWh",
-        state_class="measurement",
-    ),
-    EntitySpec("sensor", "boiler_status", "boiler_status", "boiler/status"),)
-
-DHW_MODE_ENTITY = EntitySpec('select', 'dhw_mode', 'dhw_mode', 'boiler/dhwMode', command=True, options=tuple(m.value for m in DHW_SELECTABLE_MODES))
-
-DHW_MODE_SENSOR_ENTITY = EntitySpec('sensor', 'dhw_mode', 'dhw_mode', 'boiler/dhwMode')
-
-SONDE_ENTITIES = (EntitySpec('number', 'outside_temperature', 'outside_temperature', 'outsideSensor/outsideTemperature', 'temperature', '°C', command=True),)
+# Boiler sensors: entity id, state topic under boiler/, device class, unit and kind (see _SENSOR_KINDS).
+_BOILER_SENSORS = (  # chkstyle: ignore-node
+    ('dhw_temperature', 'dhwTemperature', 'temperature', '°C', 'measurement'),
+    ('dhw_instant_temperature', 'dhwInstantTemperature', 'temperature', '°C', 'measurement'),
+    ('cdc_temperature', 'cdcTemperature', 'temperature', '°C', 'measurement'),
+    ('cdc_safety_temperature', 'cdcSafetyTemperature', 'temperature', '°C', 'measurement'),
+    ('flue_temperature', 'flueTemperature', 'temperature', '°C', 'measurement'),
+    ('dhw_power', 'dhwInstantPower', 'power', 'kW', 'measurement'),
+    ('heating_power', 'heatingInstantPower', 'power', 'kW', 'measurement'),
+    ('pressure', 'pressure', 'pressure', 'bar', 'measurement'),
+    ('dhw_consumption', 'dhwConsumption', 'energy', 'kWh', 'diagnostic'),
+    ('heating_consumption', 'heatingConsumption', 'energy', 'kWh', 'diagnostic'),
+    ('daily_dhw_consumption', 'dailyDhwConsumption', 'energy', 'kWh', 'daily'),
+    ('daily_heating_consumption', 'dailyHeatingConsumption', 'energy', 'kWh', 'daily'),
+    ('boiler_status', 'status', None, None, None))
+# The discovery options each kind of boiler sensor adds.
+_SENSOR_KINDS = dict(measurement=dict(state_class='measurement'),
+    # The previous-day counters are published with the day they cover (see `_publish_state`).
+    daily=dict(state_class='total', value_template='{{ value_json.value }}', last_reset_value_template='{{ value_json.last_reset }}'),
+    # The lifetime totals have not changed since at least 22 October 2026 while the daily counters moved, so they stay out of HA's statistics.
+    diagnostic=dict(entity_category='diagnostic'))
 
 
 class MqttAdapter:
@@ -259,17 +161,17 @@ class MqttAdapter:
         self._on_change = on_state_change
         self._on_persist_state = on_persist_state
         self._base = cfg.mqtt.base_topic.rstrip("/")
-        self._published = set()
-        self._retired_cleared = False
+        self._discovered = {} # device-discovery key -> platform of each entity HA currently has
+        self._last_discovery = None
+        self._published_state = {} # state suffix -> last value published
         self._pending_dhw_mode = None
         self._pending_dhw_until = 0.0
         self._last_published_dhw_mode = None
+        self._publish_lock = asyncio.Lock()
 
     def _topic(self, suffix: str) -> str: return f"{self._base}/{suffix}"
 
     def availability_topic(self) -> str: return self._topic(f"{DEVICE_ID}/availability")
-
-    def _discovery_topic(self, component: str, entity_id: str) -> str: return f"homeassistant/{component}/{DEVICE_ID}/{entity_id}/config"
 
     def _label(self, key: str, **placeholders: object) -> str:
         template = _LABELS.get(self._cfg.mqtt.language, _LABELS["en"]).get(key, _LABELS["en"].get(key, key))
@@ -281,35 +183,10 @@ class MqttAdapter:
         if status is None: return None
         return _BOILER_STATUS_LABELS.get(self._cfg.mqtt.language, _BOILER_STATUS_LABELS["en"])[status]
 
-    def _device_block(self) -> dict[str, Any]:
+    def _device_block(self) -> _Config:
         return dict(identifiers=[DEVICE_ID], name='Frisquet Bridge', manufacturer='Frisquet', model='Eco Radio Visio')
 
-    def _origin_block(self) -> dict[str, Any]: return {"name": "frisquet-bridge"}
-
-    def _base_discovery_payload(self, spec: EntitySpec) -> dict[str, Any]:
-        payload = dict(name=self._label(spec.label_key), unique_id=f'{DEVICE_ID}_{spec.entity_id}',
-            state_topic=self._topic(spec.state_suffix), availability_topic=self.availability_topic(), payload_available='online',
-            payload_not_available='offline', device=self._device_block(), origin=self._origin_block())
-        if spec.device_class: payload["device_class"] = spec.device_class
-        if spec.unit: payload["unit_of_measurement"] = spec.unit
-        if spec.command: payload["command_topic"] = self._topic(f"{spec.state_suffix}/set")
-        if spec.options:
-            if spec.entity_id == "dhw_mode": payload["options"] = [self._dhw_label(mode) for mode in DHW_SELECTABLE_MODES]
-            else: payload["options"] = list(spec.options)
-        if spec.state_class: payload["state_class"] = spec.state_class
-        if spec.entity_category: payload["entity_category"] = spec.entity_category
-        if spec.suggested_display_precision is not None: payload["suggested_display_precision"] = spec.suggested_display_precision
-        if spec.component == "number":
-            payload["mode"] = "box"
-            payload["step"] = 0.1
-        return payload
-
-    def _add_availability(self, payload: dict[str, Any]) -> dict[str, Any]:
-        payload["availability_topic"] = self.availability_topic()
-        payload["payload_available"] = "online"
-        payload["payload_not_available"] = "offline"
-        payload["origin"] = self._origin_block()
-        return payload
+    def _origin_block(self) -> _Config: return {"name": "frisquet-bridge"}
 
     def _zone_config(self, zone: int) -> Any: return self._cfg.zone(zone)
 
@@ -321,6 +198,16 @@ class MqttAdapter:
         zone_cfg = self._zone_config(zone)
         return zone_cfg is not None and zone_cfg.is_central_boiler
 
+    def _is_flow_zone(self, zone: int) -> bool: return zone == 1 and self._cfg.flow_temp_slope is not None
+
+    def _is_zone1_profile(self, zone: int) -> bool:
+        zone_cfg = self._zone_config(zone)
+        return zone_cfg is not None and zone_cfg.mode in ZONE1_ONLY_MODES
+
+    def _sonde_exposed(self) -> bool:
+        'Whether HA writes the outside sensor, which the bridge does itself in flow_temp mode'
+        return self._cfg.sonde is not None and self._cfg.sonde.enabled and self._cfg.flow_temp_slope is None
+
     def _is_read_only_satellite_zone(self, zone: int) -> bool:
         zone_cfg = self._zone_config(zone)
         return (
@@ -330,156 +217,109 @@ class MqttAdapter:
 
     def _boiler_commands_enabled(self) -> bool: return self._ops is not None and self._cfg.connect_writes_enabled
 
-    async def _publish_discovery_payload(
-        self,
-        client: aiomqtt.Client,
-        component: str,
-        entity_id: str,
-        payload: dict[str, Any], # discovery config payload
-    ) -> bool:
-        key = f"{component}.{entity_id}"
-        if key in self._published: return False
-        await client.publish(self._discovery_topic(component, entity_id), json.dumps(payload), retain=True)
-        self._published.add(key)
-        return True
+    def _component(self, platform: str, entity_id: str, name: str | None = None, **config: Any) -> tuple[str, _Config]:
+        "A device-discovery component, named by its label unless `name` is given. Keys include the platform, so a platform change removes the old entity"
+        return f"{platform}_{entity_id}", dict(p=platform, name=name or self._label(entity_id), unique_id=f"{DEVICE_ID}_{entity_id}",
+            default_entity_id=f"{platform}.{DEVICE_ID}_{entity_id}", **{key: value for key, value in config.items() if value is not None})
 
-    async def _clear_discovery(self, client: aiomqtt.Client, component: str, entity_id: str) -> None:
-        await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
+    def _temperature_sensor(self, entity_id: str, suffix: str, name: str | None = None, **config: Any) -> tuple[str, _Config]:
+        return self._component("sensor", entity_id, name, state_topic=self._topic(suffix), device_class="temperature", unit_of_measurement="°C",
+            state_class="measurement", suggested_display_precision=1, **config)
 
-    async def _publish_central_discovery(self, client: aiomqtt.Client) -> int:
-        count = 0
-        device = self._device_block()
-        switch_payload = dict(name=self._label('central_heat_demand'), unique_id=f'{DEVICE_ID}_central_heat_demand', state_topic=self._topic('central/demand'),
-            command_topic=self._topic('central/demand/set'), payload_on='ON', payload_off='OFF', device=device)
-        self._add_availability(switch_payload)
-        if await self._publish_discovery_payload(client, "switch", "central_heat_demand", switch_payload): count += 1
+    def _temperature_number(self, entity_id: str, suffix: str, low: float, high: float, step: float = 0.1, name: str | None = None,
+        **config: Any) -> tuple[str, _Config]:
+        return self._component("number", entity_id, name, state_topic=self._topic(suffix), command_topic=self._topic(f"{suffix}/set"),
+            device_class="temperature", unit_of_measurement="°C", min=low, max=high, step=step, mode="box", **config)
 
-        number_specs = (('central_setpoint', 'central_setpoint', 'central/setpoint', 5, 30, 0.5),
-            ('central_demand_on_delta', 'central_demand_on_delta', 'central/demandOnDelta', 0, 15, 0.1),
-            ('central_demand_off_margin', 'central_demand_off_margin', 'central/demandOffMargin', 0, 15, 0.1))
-        for entity_id, label_key, suffix, min_value, max_value, step in number_specs:
-            payload = dict(name=self._label(label_key), unique_id=f'{DEVICE_ID}_{entity_id}', state_topic=self._topic(suffix),
-                command_topic=self._topic(f'{suffix}/set'), device_class='temperature', unit_of_measurement='°C', min=min_value,
-                max=max_value, mode='box', step=step, entity_category='config', device=device)
-            self._add_availability(payload)
-            if await self._publish_discovery_payload(client, "number", entity_id, payload): count += 1
+    def _switch(self, entity_id: str, suffix: str) -> tuple[str, _Config]:
+        return self._component("switch", entity_id, state_topic=self._topic(suffix), command_topic=self._topic(f"{suffix}/set"), payload_on="ON",
+            payload_off="OFF")
 
-        sensor_specs = (('central_boiler_status', 'central_boiler_status', 'central/boilerStatus', None, None),
-            ('central_outside_temperature', 'central_outside_temperature', 'central/outsideTemperature', 'temperature', '°C'))
-        for entity_id, label_key, suffix, device_class, unit in sensor_specs:
-            payload = dict(name=self._label(label_key), unique_id=f'{DEVICE_ID}_{entity_id}', state_topic=self._topic(suffix), device=device)
-            self._add_availability(payload)
-            if device_class:
-                payload["device_class"] = device_class
-                payload["state_class"] = "measurement"
-                payload["suggested_display_precision"] = 1
-            if unit: payload["unit_of_measurement"] = unit
-            if await self._publish_discovery_payload(client, "sensor", entity_id, payload): count += 1
-        return count
+    def _central_components(self) -> list[tuple[str, _Config]]:
+        numbers = (("central_setpoint", "setpoint", 5, 30, 0.5), ("central_demand_on_delta", "demandOnDelta", 0, 15, 0.1),
+            ("central_demand_off_margin", "demandOffMargin", 0, 15, 0.1))
+        return [self._switch("central_heat_demand", "central/demand"),
+            *(self._temperature_number(entity_id, f"central/{suffix}", low, high, step, entity_category="config")
+                for entity_id, suffix, low, high, step in numbers),
+            self._component("sensor", "central_boiler_status", state_topic=self._topic("central/boilerStatus")),
+            self._temperature_sensor("central_outside_temperature", "central/outsideTemperature")]
 
-    async def _publish_zone_flow_discovery(self, client: aiomqtt.Client, zone: int) -> int:
-        count = 0
-        for entity_id, label_key, suffix in (
-            (f"zone{zone}_flow_temperature", "zone_flow_temperature", f"z{zone}/flowTemperature"),
-            (f"zone{zone}_flow_setpoint_temperature", "zone_flow_setpoint_temperature", f"z{zone}/flowSetpointTemperature"),
-        ):
-            payload = dict(name=self._label(label_key, zone=zone), unique_id=f'{DEVICE_ID}_{entity_id}', state_topic=self._topic(suffix),
-                device_class='temperature', state_class='measurement', unit_of_measurement='°C', suggested_display_precision=1,
-                device=self._device_block())
-            self._add_availability(payload)
-            if await self._publish_discovery_payload(client, "sensor", entity_id, payload): count += 1
-        return count
+    def _flow_components(self) -> list[tuple[str, _Config]]:
+        high = round(flow_temp_max(self._cfg.flow_temp_slope), 1)
+        return [self._switch("flow_demand", "flow/demand"), self._temperature_number("flow_target", "flow/target", FLOW_CURVE_FLOW, high),
+            self._temperature_sensor("flow_outside_temperature", "flow/outsideTemperature", entity_category="diagnostic")]
 
-    async def _publish_rf_discovery(self, client: aiomqtt.Client) -> int:
-        count = 0
-        for operation in sorted(self._data.rf_operations):
-            entity_id = f"rf_{operation}"
-            topic = self._topic(f"diagnostics/rf/{operation}")
-            payload = dict(name=self._label('rf_operation', operation=operation.replace('_', ' ')), unique_id=f'{DEVICE_ID}_{entity_id}',
-                state_topic=topic, value_template='{{ value_json.state }}', json_attributes_topic=topic, entity_category='diagnostic',
-                device=self._device_block())
-            self._add_availability(payload)
-            if await self._publish_discovery_payload(client, "sensor", entity_id, payload): count += 1
-        return count
+    def _climate_components(self, zone: int) -> list[tuple[str, _Config]]:
+        prefix, simple = f"z{zone}", self._is_simple_zone(zone)
+        commands = {} if self._is_read_only_satellite_zone(zone) else dict(mode_command_topic=self._topic(f"{prefix}/mode/set"),
+            preset_mode_command_topic=self._topic(f"{prefix}/preset/set"), temperature_command_topic=self._topic(f"{prefix}/targetTemperature/set"))
+        climate = self._component("climate", f"zone{zone}_climate", self._label("zone_heating", zone=zone),
+            modes=list(SIMPLE_HVAC_MODES if simple else HVAC_MODES), preset_modes=list(SIMPLE_PRESET_MODES if simple else MQTT_PRESET_MODES),
+            mode_state_topic=self._topic(f"{prefix}/mode"), preset_mode_state_topic=self._topic(f"{prefix}/preset"),
+            action_topic=self._topic(f"{prefix}/action"), current_temperature_topic=self._topic(f"{prefix}/currentTemperature"),
+            temperature_state_topic=self._topic(f"{prefix}/targetTemperature"),
+            min_temp=CLIMATE_MIN_TEMP, max_temp=CLIMATE_MAX_TEMP, temp_step=CLIMATE_TEMP_STEP, temperature_unit="C", precision=0.1, **commands)
+        if zone not in self._virtual: return [climate]
+        # A virtual satellite reports the room temperature that Home Assistant feeds it.
+        return [climate, self._temperature_number(f"zone{zone}_reported_ambient", f"{prefix}/reportedAmbient", CLIMATE_MIN_TEMP, 35,
+            name=self._label("zone_reported_ambient", zone=zone))]
 
-    async def publish_discovery(self, client: aiomqtt.Client) -> None:
-        specs = list(BOILER_SENSOR_ENTITIES) if self._boiler_entities_enabled() else []
-        if self._boiler_entities_enabled(): specs.append(DHW_MODE_ENTITY if self._boiler_commands_enabled() else DHW_MODE_SENSOR_ENTITY)
-        if self._cfg.sonde is not None and self._cfg.sonde.enabled: specs.extend(SONDE_ENTITIES)
-        published_count = 0
-        for spec in specs:
-            key = f"{spec.component}.{spec.entity_id}"
-            if key in self._published: continue
-            payload = self._base_discovery_payload(spec)
-            await client.publish(self._discovery_topic(spec.component, spec.entity_id), json.dumps(payload), retain=True)
-            self._published.add(key)
-            published_count += 1
-        if not self._boiler_entities_enabled():
-            for spec in BOILER_SENSOR_ENTITIES: await self._clear_discovery(client, spec.component, spec.entity_id)
-            await self._clear_discovery(client, DHW_MODE_ENTITY.component, DHW_MODE_ENTITY.entity_id)
-            await self._clear_discovery(client, DHW_MODE_SENSOR_ENTITY.component, DHW_MODE_SENSOR_ENTITY.entity_id)
-        elif self._boiler_commands_enabled():
-            await self._clear_discovery(client, DHW_MODE_SENSOR_ENTITY.component, DHW_MODE_SENSOR_ENTITY.entity_id)
-        else: await self._clear_discovery(client, DHW_MODE_ENTITY.component, DHW_MODE_ENTITY.entity_id)
-
+    def _components(self) -> dict[str, _Config]:
+        "Every entity the current configuration exposes, as device-discovery components"
+        components = []
+        if self._boiler_entities_enabled():
+            for entity_id, suffix, device_class, unit, kind in _BOILER_SENSORS:
+                components.append(self._component("sensor", entity_id, state_topic=self._topic(f"boiler/{suffix}"), device_class=device_class,
+                    unit_of_measurement=unit, suggested_display_precision=1 if unit in ("°C", "kW", "bar") else None, **_SENSOR_KINDS.get(kind, {})))
+            dhw = dict(state_topic=self._topic("boiler/dhwMode"))
+            if self._boiler_commands_enabled():
+                components.append(self._component("select", "dhw_mode", command_topic=self._topic("boiler/dhwMode/set"),
+                    options=[self._dhw_label(mode) for mode in DHW_SELECTABLE_MODES], **dhw))
+            else: components.append(self._component("sensor", "dhw_mode", **dhw))
+        if self._sonde_exposed():
+            components.append(self._temperature_number("outside_temperature", "outsideSensor/outsideTemperature", SONDE_MIN_TEMPERATURE, SONDE_MAX_TEMPERATURE))
         for zone in (1, 2, 3):
             if not self._cfg.zone_enabled(zone): continue
-            published_count += await self._publish_zone_flow_discovery(client, zone)
-            if self._is_central_zone(zone):
-                published_count += await self._publish_central_discovery(client)
-                await self._clear_discovery(client, "climate", f"zone{zone}_climate")
-                await self._clear_discovery(client, "number", f"zone{zone}_reported_ambient")
-                continue
-            entity_id = f"zone{zone}_climate"
-            key = f"climate.{entity_id}"
-            if key not in self._published:
-                prefix = f"z{zone}"
-                modes = SIMPLE_HVAC_MODES if self._is_simple_zone(zone) else HVAC_MODES
-                preset_modes = SIMPLE_PRESET_MODES if self._is_simple_zone(zone) else MQTT_PRESET_MODES
-                climate_payload = dict(name=self._label("zone_heating", zone=zone), unique_id=f"{DEVICE_ID}_{entity_id}", modes=list(modes),
-                    mode_state_topic=self._topic(f"{prefix}/mode"), preset_modes=list(preset_modes), preset_mode_state_topic=self._topic(f"{prefix}/preset"),
-                    action_topic=self._topic(f"{prefix}/action"), current_temperature_topic=self._topic(f"{prefix}/currentTemperature"),
-                    temperature_state_topic=self._topic(f"{prefix}/targetTemperature"), min_temp=CLIMATE_MIN_TEMP, max_temp=CLIMATE_MAX_TEMP,
-                    temp_step=CLIMATE_TEMP_STEP, temperature_unit="C", precision=0.1, device=self._device_block())
-                if not self._is_read_only_satellite_zone(zone):
-                    climate_payload.update(mode_command_topic=self._topic(f'{prefix}/mode/set'), preset_mode_command_topic=self._topic(f'{prefix}/preset/set'),
-                        temperature_command_topic=self._topic(f'{prefix}/targetTemperature/set'))
-                self._add_availability(climate_payload)
-                await client.publish(self._discovery_topic("climate", entity_id), json.dumps(climate_payload), retain=True)
-                self._published.add(key)
-                published_count += 1
+            for key, suffix in (("flow_temperature", "flowTemperature"), ("flow_setpoint_temperature", "flowSetpointTemperature")):
+                components.append(self._temperature_sensor(f"zone{zone}_{key}", f"z{zone}/{suffix}", self._label(f"zone_{key}", zone=zone)))
+            if self._is_central_zone(zone): components += self._central_components()
+            elif self._is_flow_zone(zone): components += self._flow_components()
+            else: components += self._climate_components(zone)
+        for operation in sorted(self._data.rf_operations):
+            topic = self._topic(f"diagnostics/rf/{operation}")
+            components.append(self._component("sensor", f"rf_{operation}", self._label("rf_operation", operation=operation.replace("_", " ")),
+                state_topic=topic, value_template="{{ value_json.state }}", json_attributes_topic=topic, entity_category="diagnostic"))
+        return dict(components)
 
-            # Virtual-satellite zones expose the room temperature as an input so
-            # Home Assistant (e.g. a real room sensor) can feed what we report
-            # to the boiler on that zone's behalf.
-            if zone in self._virtual and not self._is_central_zone(zone):
-                ambient_id = f"zone{zone}_reported_ambient"
-                ambient_key = f"number.{ambient_id}"
-                if ambient_key not in self._published:
-                    ambient_payload = dict(name=self._label("zone_reported_ambient", zone=zone), unique_id=f"{DEVICE_ID}_{ambient_id}",
-                        state_topic=self._topic(f"z{zone}/reportedAmbient"), command_topic=self._topic(f"z{zone}/reportedAmbient/set"),
-                        device_class="temperature", unit_of_measurement="°C", min=CLIMATE_MIN_TEMP, max=35, mode="box", step=0.1,
-                        device=self._device_block())
-                    self._add_availability(ambient_payload)
-                    await client.publish(self._discovery_topic("number", ambient_id), json.dumps(ambient_payload), retain=True)
-                    self._published.add(ambient_key)
-                    published_count += 1
+    def _discovery(self, components: dict[str, _Config]) -> str:
+        availability = [dict(topic=self.availability_topic(), payload_available="online", payload_not_available="offline")]
+        return json.dumps(dict(dev=self._device_block(), o=self._origin_block(), availability=availability, cmps=components), sort_keys=True)
 
-        if not self._retired_cleared:
-            for component, entity_id in _RETIRED_ZONE_ENTITIES:
-                await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
-            for component, entity_id in _RETIRED_CENTRAL_FLOW_ENTITIES:
-                await client.publish(self._discovery_topic(component, entity_id), "", retain=True)
-            self._retired_cleared = True
-
-        published_count += await self._publish_rf_discovery(client)
-        avail = self.availability_topic()
-        await client.publish(avail, "online", retain=True)
-        log.info("mqtt_discovery_published", entity_count=published_count, availability_topic=avail)
+    async def publish_discovery(
+        self,
+        client: aiomqtt.Client,
+        *,
+        force: bool = False, # publish even if the config is unchanged, e.g. after Home Assistant restarts
+    ) -> None:
+        "Publish the device-discovery config if it changed, removing the entities the previous config had and this one lacks"
+        components = self._components()
+        # HA removes a component that is sent with only its platform; a later config then leaves it out.
+        removed = {key: dict(p=platform) for key, platform in self._discovered.items() if key not in components}
+        if removed: await client.publish(DEVICE_TOPIC, self._discovery(components | removed), retain=True)
+        payload = self._discovery(components)
+        if force or removed or payload != self._last_discovery:
+            await client.publish(DEVICE_TOPIC, payload, retain=True)
+            log.info("mqtt_discovery_published", entity_count=len(components), removed=sorted(removed))
+        self._last_discovery, self._discovered = payload, {key: config["p"] for key, config in components.items()}
+        await client.publish(self.availability_topic(), "online", retain=True)
 
     async def publish_offline(self, client: aiomqtt.Client) -> None: await client.publish(self.availability_topic(), "offline", retain=True)
 
     async def publish_state(self, client: aiomqtt.Client) -> None:
+        # Several tasks publish. Serialising them keeps an older snapshot from landing after a newer one in HA's retained state.
+        async with self._publish_lock: await self._publish_state(client)
+
+    async def _publish_state(self, client: aiomqtt.Client) -> None:
         b = self._data.boiler
         mapping = {}
         if self._boiler_entities_enabled():
@@ -488,13 +328,14 @@ class MqttAdapter:
                 "boiler/flueTemperature": _fmt(b.flue_temperature), "boiler/dhwInstantPower": _fmt(b.dhw_power),
                 "boiler/heatingInstantPower": _fmt(b.heating_power), "boiler/pressure": _fmt(b.pressure),
                 "boiler/dhwConsumption": _fmt_int(b.dhw_consumption), "boiler/heatingConsumption": _fmt_int(b.heating_consumption),
-                "boiler/dailyDhwConsumption": _fmt_int(b.daily_dhw_consumption), "boiler/dailyHeatingConsumption": _fmt_int(b.daily_heating_consumption),
                 "boiler/status": self._boiler_status_label(b.status)})
-        if self._boiler_entities_enabled():
+            # The previous-day counters go out with the day they cover, so HA's statistics add each day exactly once.
+            reset = daily_consumption_reset(b.daily_consumption_read_at)
+            for suffix, value in (("dailyDhwConsumption", b.daily_dhw_consumption), ("dailyHeatingConsumption", b.daily_heating_consumption)):
+                mapping[f"boiler/{suffix}"] = None if value is None or reset is None else json.dumps(dict(value=value, last_reset=reset))
             dhw_mode = self._visible_dhw_mode()
             mapping["boiler/dhwMode"] = self._dhw_label(dhw_mode) if dhw_mode else None
-        if self._cfg.sonde is not None and self._cfg.sonde.enabled:
-            mapping["outsideSensor/outsideTemperature"] = _fmt(self._data.sonde.outside_temperature)
+        if self._sonde_exposed(): mapping["outsideSensor/outsideTemperature"] = _fmt(self._data.sonde.outside_temperature)
         for zone, state in self._data.zones.items():
             if not self._cfg.zone_enabled(zone): continue
             prefix = f"z{zone}"
@@ -507,6 +348,11 @@ class MqttAdapter:
                 mapping["central/demandOffMargin"] = _fmt(state.central_demand_off_margin)
                 mapping["central/boilerStatus"] = self._boiler_status_label(b.status)
                 mapping["central/outsideTemperature"] = _fmt(b.outside_temperature)
+                continue
+            if self._is_flow_zone(zone):
+                mapping["flow/demand"] = _fmt_bool(state.flow_demand)
+                mapping["flow/target"] = _fmt(state.flow_target)
+                mapping["flow/outsideTemperature"] = _fmt(self._data.sonde.outside_temperature)
                 continue
             mapping[f"{prefix}/mode"] = simple_hvac_mode(state) if self._is_simple_zone(zone) else zone_hvac_mode(state)
             mapping[f"{prefix}/preset"] = simple_preset(state) if self._is_simple_zone(zone) else zone_preset(state)
@@ -521,11 +367,6 @@ class MqttAdapter:
                 mapping[f"{prefix}/currentTemperature"] = _fmt(current)
                 mapping[f"{prefix}/reportedAmbient"] = _fmt(state.reported_ambient)
             else: mapping[f"{prefix}/currentTemperature"] = _fmt(state.ambient_temperature)
-        published_count = 0
-        for suffix, value in mapping.items():
-            if value is not None:
-                await client.publish(self._topic(suffix), value, retain=True)
-                published_count += 1
         for operation, health in sorted(self._data.rf_operations.items()):
             diagnostic = dict(operation=operation, state=health.state, fresh=health.is_fresh, attempts=health.attempts,
                 successes=health.successes, nacks=health.nacks, timeouts=health.timeouts, transport_failures=health.transport_failures,
@@ -535,7 +376,12 @@ class MqttAdapter:
             if health.zone is not None:
                 diagnostic["zone"] = health.zone
                 diagnostic["source"] = self._data.zones[health.zone].source.value
-            await client.publish(self._topic(f'diagnostics/rf/{operation}'), json.dumps(diagnostic, sort_keys=True), retain=True)
+            mapping[f'diagnostics/rf/{operation}'] = json.dumps(diagnostic, sort_keys=True)
+        published_count = 0
+        for suffix, value in mapping.items():
+            if value is None or self._published_state.get(suffix) == value: continue
+            await client.publish(self._topic(suffix), value, retain=True)
+            self._published_state[suffix] = value
             published_count += 1
         if self._boiler_entities_enabled():
             dhw_mode = self._visible_dhw_mode()
@@ -568,15 +414,18 @@ class MqttAdapter:
             if self._on_change: await self._on_change()
         elif topic.endswith("outsideSensor/outsideTemperature/set"):
             temperature = float(payload)
-            if self._outside_temperature_writer is not None: await self._outside_temperature_writer(temperature)
+            if self._cfg.flow_temp_slope is not None: log.warning("mqtt_command_ignored", topic=topic, reason="flow_temp_owns_sonde")
+            elif self._outside_temperature_writer is not None: await self._outside_temperature_writer(temperature)
             elif self._sonde_ops is not None:
                 await self._sonde_ops.write_outside_temperature(self._data, temperature)
                 if self._on_change: await self._on_change()
             else: log.warning("mqtt_command_ignored", topic=topic)
         else:
-            central_command = self._central_command(topic)
-            if central_command is not None:
-                await self._handle_central_command(central_command, payload)
+            profile_command = self._profile_command(topic)
+            if profile_command is not None:
+                profile, command = profile_command
+                if profile == "central": await self._handle_central_command(command, payload)
+                else: await self._handle_flow_command(command, payload)
                 if self._on_change: await self._on_change()
                 return
             zone_command = self._zone_command(topic)
@@ -584,10 +433,10 @@ class MqttAdapter:
                 log.warning("mqtt_command_ignored", topic=topic)
                 return
             zone, command = zone_command
-            if self._is_central_zone(zone):
+            if self._is_zone1_profile(zone):
                 log.warning("mqtt_command_ignored", topic=topic)
                 return
-            if zone in self._virtual and not self._is_central_zone(zone): await self._handle_virtual_zone_command(zone, command, payload)
+            if zone in self._virtual: await self._handle_virtual_zone_command(zone, command, payload)
             elif self._is_read_only_satellite_zone(zone):
                 log.warning("mqtt_command_ignored", topic=topic, reason="read_only_satellite_zone")
                 return
@@ -597,17 +446,43 @@ class MqttAdapter:
                 return
             if self._on_change: await self._on_change()
 
-    async def handle_message(self, client: aiomqtt.Client, topic: str, payload: str) -> None:
+    async def handle_message(
+        self,
+        client: aiomqtt.Client,
+        topic: str,
+        payload: str,
+        retain: bool = False, # the broker delivered a stored message, not a new one
+    ) -> None:
         body = payload.strip()
         if topic == "homeassistant/status":
             if body == "online":
-                self._published.clear()
-                self._retired_cleared = False
-                await self.publish_discovery(client)
+                self._published_state.clear()
+                await self.publish_discovery(client, force=True)
                 await self.publish_state(client)
                 log.info("mqtt_homeassistant_birth_handled")
             return
+        if topic == DEVICE_TOPIC:
+            # The bridge's own config from its previous run lists the entities to remove if this run no longer has them.
+            if retain and body:
+                self._discovered = {key: config['p'] for key, config in json.loads(body).get('cmps', {}).items() if len(config) > 1}
+                await self.publish_discovery(client)
+            return
+        if legacy := _LEGACY_DISCOVERY.fullmatch(topic):
+            if retain and body and "migrate_discovery" not in body: await self._migrate(client, topic, f"{legacy[1]}_{legacy[2]}")
+            return
+        if retain:
+            log.warning("mqtt_command_ignored", topic=topic, reason="retained")
+            return
         await self.handle_command(topic, body)
+
+    async def _migrate(self, client: aiomqtt.Client, topic: str, key: str) -> None:
+        "Move a per-entity discovery config from before device discovery into the device config, keeping the entity in HA's registry"
+        kept = key in self._components()
+        if kept:
+            await client.publish(topic, json.dumps(dict(migrate_discovery=True)), retain=True)
+            await self.publish_discovery(client, force=True)
+        await client.publish(topic, "", retain=True)
+        log.info("mqtt_discovery_migrated", topic=topic, kept=kept)
 
     async def _handle_central_command(self, command: str, payload: str) -> None:
         if not self._is_central_zone(1):
@@ -623,7 +498,23 @@ class MqttAdapter:
             return
         self._persist_state()
         satellite = self._virtual.get(1)
-        if satellite is not None: await satellite.send_now()
+        if satellite is not None: satellite.request_send()
+
+    async def _handle_flow_command(self, command: str, payload: str) -> None:
+        slope = self._cfg.flow_temp_slope
+        if slope is None:
+            log.warning("mqtt_command_ignored", command=command)
+            return
+        zone = self._data.zones[1]
+        if command == "demand":
+            zone.flow_demand = _parse_bool(payload)
+            self._persist_state()
+            satellite = self._virtual.get(1)
+            if satellite is not None: satellite.request_send()
+            return
+        zone.flow_target = min(max(round(float(payload), 1), FLOW_CURVE_FLOW), flow_temp_max(slope))
+        self._persist_state()
+        if self._outside_temperature_writer is not None: await self._outside_temperature_writer(flow_temp_outdoor(zone.flow_target, slope))
 
     async def _handle_connect_zone_command(
         self,
@@ -659,7 +550,7 @@ class MqttAdapter:
             log.warning("mqtt_command_ignored", zone=zone, command=command)
             return
         self._persist_state()
-        await satellite.send_now()
+        satellite.request_send()
 
     def _persist_state(self) -> None:
         if self._on_persist_state is not None: self._on_persist_state()
@@ -671,13 +562,12 @@ class MqttAdapter:
         self._pending_dhw_until = 0.0
         return self._data.boiler.dhw_mode
 
-    def _central_command(self, topic: str) -> str | None:
+    def _profile_command(self, topic: str) -> tuple[str, str] | None:
         prefix = f"{self._base}/"
         if not topic.startswith(prefix): return None
         parts = topic[len(prefix) :].split("/")
-        if len(parts) != 3 or parts[0] != "central" or parts[2] != "set": return None
-        if parts[1] not in {"demand", "setpoint", "demandOnDelta", "demandOffMargin"}: return None
-        return parts[1]
+        if len(parts) != 3 or parts[2] != "set" or parts[1] not in _PROFILE_COMMANDS.get(parts[0], ()): return None
+        return parts[0], parts[1]
 
     def _zone_command(self, topic: str) -> tuple[int, str] | None:
         prefix = f"{self._base}/"
@@ -692,17 +582,16 @@ class MqttAdapter:
         return zone, parts[1]
 
     async def run(self, client: aiomqtt.Client) -> None:
+        # Subscribe before publishing, so the broker's retained discovery configs from earlier runs arrive here.
+        for topic_filter in (f"{self._base}/+/+/set", "homeassistant/status", DEVICE_TOPIC, f"homeassistant/+/{DEVICE_ID}/+/config"):
+            await client.subscribe(topic_filter)
+            log.info("mqtt_subscribed", topic_filter=topic_filter)
         await self.publish_discovery(client)
         await self.publish_state(client)
-        cmd_filter = f"{self._base}/+/+/set"
-        await client.subscribe(cmd_filter)
-        await client.subscribe("homeassistant/status")
-        log.info("mqtt_subscribed", topic_filter=cmd_filter)
-        log.info("mqtt_subscribed", topic_filter="homeassistant/status")
         async for message in client.messages:
             topic = str(message.topic)
             body = message.payload.decode("utf-8", errors="replace")
-            try: await self.handle_message(client, topic, body)
+            try: await self.handle_message(client, topic, body, retain=message.retain)
             except Exception as exc: log.exception("mqtt_command_failed", topic=topic, error=str(exc))
 
 

@@ -14,7 +14,7 @@ import asyncio, contextlib
 
 import structlog
 
-from frisquet_bridge.boiler_profile import central_boiler_consigne, simple_consigne
+from frisquet_bridge.boiler_profile import central_boiler_consigne, flow_temp_consigne, simple_consigne
 from frisquet_bridge.climate import zone_target_temperature
 from frisquet_bridge.connect.ops import BoilerOps
 from frisquet_bridge.model import BoilerData
@@ -25,10 +25,10 @@ log = structlog.get_logger(__name__)
 # OpenFrisquetVisio resends a zone's setpoint on change (debounced) and at least
 # every 10 minutes so the boiler keeps the zone alive.
 CONSIGNE_INTERVAL = 600.0
+CONSIGNE_RETRY_INTERVAL = 60.0
 
-# Consigne builders for the profiles whose setpoint comes from boiler demand
-# rather than from the HA climate entity.
-_CONSIGNE_BY_PROFILE = {"central_boiler": central_boiler_consigne, "simple_satellite": simple_consigne}
+# Profiles that build their own consigne. A plain virtual_satellite reports the HA climate entity's setpoint as it is.
+_CONSIGNE_BY_PROFILE = dict(central_boiler=central_boiler_consigne, simple_satellite=simple_consigne, flow_temp=flow_temp_consigne)
 
 
 class VirtualSatellite:
@@ -42,7 +42,7 @@ class VirtualSatellite:
         *,
         interval: float = CONSIGNE_INTERVAL,
         connect_compat: bool = False,
-        profile: str = "virtual_satellite", # consigne profile: virtual_satellite, central_boiler or simple_satellite
+        profile: str = "virtual_satellite", # consigne profile: a zone mode from config.VIRTUAL_SATELLITE_MODES
         on_update: UpdateNotify | None = None,
     ) -> None:
         self._zone = zone
@@ -56,7 +56,7 @@ class VirtualSatellite:
         self._stop = asyncio.Event()
 
     def request_send(self) -> None:
-        'Ask the runner to send a consigne now (e.g. after an HA command).'
+        "Ask the runner to send a consigne with the zone's latest values, e.g. after an HA command"
         self._wake.set()
 
     def stop(self) -> None:
@@ -64,16 +64,15 @@ class VirtualSatellite:
         self._wake.set()
 
     async def run(self) -> None:
+        # The runner is the only sender. Clearing the wake before reading the zone makes a change that arrives
+        # mid-send trigger one more send, instead of being lost until the next interval.
         while not self._stop.is_set():
-            await self._send_once()
             self._wake.clear()
-            with contextlib.suppress(TimeoutError): await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
+            interval = self._interval if await self.send_once() else CONSIGNE_RETRY_INTERVAL
+            with contextlib.suppress(TimeoutError): await asyncio.wait_for(self._wake.wait(), timeout=interval)
 
-    async def send_now(self) -> bool:
-        'Send a single consigne immediately; returns True if it was sent.'
-        return await self._send_once()
-
-    async def _send_once(self) -> bool:
+    async def send_once(self) -> bool:
+        "Send one consigne from the zone's current values; returns True if the boiler accepted it"
         zs = self._data.zones[self._zone]
         consigne_fn = _CONSIGNE_BY_PROFILE.get(self._profile)
         if consigne_fn is None:

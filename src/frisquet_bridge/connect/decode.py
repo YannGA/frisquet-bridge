@@ -93,6 +93,7 @@ def decode_daily_consumption(payload: bytes, data: BoilerData) -> None:
     if len(payload) < 23: raise ValueError(f"daily consumption payload too short: {len(payload)} bytes")
     data.boiler.daily_dhw_consumption = struct.unpack(">h", payload[19:21])[0]
     data.boiler.daily_heating_consumption = struct.unpack(">h", payload[21:23])[0]
+    data.boiler.daily_consumption_read_at = data.last_seen_date
 
 
 def decode_dhw_mode(payload: bytes, data: BoilerData, *, frame_bits: int | None = None) -> None:

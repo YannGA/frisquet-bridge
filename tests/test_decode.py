@@ -7,7 +7,7 @@ from frisquet_bridge.connect.decode import (BOILER_EVENT_KIND_CLEAR, BOILER_EVEN
     describe_boiler_event, encode_satellite_mode, parse_boiler_event_push, parse_memory_push)
 from frisquet_bridge.connect.passive import PassiveReadTracker
 from frisquet_bridge.frame import MSG_INIT, MSG_READ, Frame
-from frisquet_bridge.model import BoilerData, DhwMode, ZoneMode, ZoneSource, ZoneState
+from frisquet_bridge.model import BoilerData, DhwMode, ZoneMode, ZoneSource, ZoneState, daily_consumption_reset
 
 # Real captures (logs/re).
 SENSORS_CONNECT = bytes.fromhex('38028802b1012004f604f6020500000000000000001a000005015900000000000000000000011104f604f600c600c600c6005000000000050a')
@@ -89,9 +89,15 @@ def test_decode_consumption_blocks():
     assert (data.boiler.dhw_consumption, data.boiler.heating_consumption) == (100, 200)
     assert (data.boiler.daily_dhw_consumption, data.boiler.daily_heating_consumption) == (None, None)
 
+    data.last_seen_date = "2026-10-27T00:54:00"
     decode_daily_consumption(bytes(payload), data)
     assert (data.boiler.daily_dhw_consumption, data.boiler.daily_heating_consumption) == (5, 0)
     assert (data.boiler.dhw_consumption, data.boiler.heating_consumption) == (100, 200)
+    # Read before 03:00, the counters may still hold the day before yesterday, so they claim no day yet.
+    assert daily_consumption_reset(data.boiler.daily_consumption_read_at) is None
+    data.last_seen_date = "2026-10-27T03:10:00"
+    decode_daily_consumption(bytes(payload), data)
+    assert daily_consumption_reset(data.boiler.daily_consumption_read_at).startswith("2026-10-26T00:00:00")
 
 
 def test_passive_read_tracker_matches_read_responses():

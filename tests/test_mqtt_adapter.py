@@ -5,9 +5,9 @@ import asyncio, json
 import pytest
 
 from frisquet_bridge.climate import HVAC_AUTO, PRESET_COMFORT
-from frisquet_bridge.config import BridgeConfig, ConnectConfig, DeviceIdentity, ZoneConfig
+from frisquet_bridge.config import BridgeConfig, ConnectConfig, DeviceIdentity, SondeConfig, ZoneConfig
 from frisquet_bridge.model import BoilerData, BoilerStatus, DhwMode, ZoneMode, ZoneSource
-from frisquet_bridge.mqtt.adapter import MqttAdapter
+from frisquet_bridge.mqtt.adapter import DEVICE_TOPIC, MqttAdapter
 
 
 class FakeOps:
@@ -40,9 +40,7 @@ class SlowDhwOps(FakeOps):
 class FakeSatellite:
     def __init__(self): self.sends = 0
 
-    async def send_now(self):
-        self.sends += 1
-        return True
+    def request_send(self): self.sends += 1
 
 
 class FakeMqttClient:
@@ -168,96 +166,82 @@ async def test_zone_commands_route_by_profile(tmp_path, virtual_adapter, satelli
     assert persisted == ["saved"] * 4
 
 
-async def test_discovery_dhw_and_climate_depend_on_write_capability(tmp_path, adapter, satellite_adapter):
-    mqtt, _data, _ops = adapter
+async def _discover(mqtt):
+    "Publish discovery, returning the client and the components of the device config it received"
     client = FakeMqttClient()
     await mqtt.publish_discovery(client)
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    dhw_mode = json.loads(payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"])
-    assert dhw_mode["state_topic"] == "frisquet/boiler/dhwMode"
-    assert dhw_mode["command_topic"] == "frisquet/boiler/dhwMode/set"
-    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_mode/config"] == ""
+    configs = [payload for topic, payload, _retain in client.published if topic == DEVICE_TOPIC]
+    return client, json.loads(configs[-1])["cmps"]
+
+
+async def test_discovery_exposes_the_entities_each_configuration_needs(tmp_path, adapter, satellite_adapter):
+    mqtt, _data, _ops = adapter
+    client, components = await _discover(mqtt)
+    device = json.loads(client.published[0][1])
+    assert (device["dev"]["identifiers"], device["o"], device["availability"][0]["topic"]) == (
+        ["frisquet_bridge"], {"name": "frisquet-bridge"}, "frisquet/frisquet_bridge/availability")
+    # unique_id and default_entity_id are what HA's registry keys the entities on; changing them makes new entities.
+    temperature = components["sensor_dhw_temperature"]
+    assert (temperature["unique_id"], temperature["default_entity_id"], temperature["state_topic"]) == (
+        "frisquet_bridge_dhw_temperature", "sensor.frisquet_bridge_dhw_temperature", "frisquet/boiler/dhwTemperature")
+    assert components["select_dhw_mode"]["command_topic"] == "frisquet/boiler/dhwMode/set"
+    climate = components["climate_zone1_climate"]
+    assert climate["mode_command_topic"] == "frisquet/z1/mode/set" and "boost" not in climate["preset_modes"]
 
     mqtt, _data, _ops = satellite_adapter
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    climate = json.loads(payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"])
-    assert climate["mode_state_topic"] == "frisquet/z1/mode"
-    assert "mode_command_topic" not in climate
-    assert "preset_mode_command_topic" not in climate
-    assert "temperature_command_topic" not in climate
-
-    mqtt, _data, _satellite, _persisted = _persisting_adapter(tmp_path, "simple_satellite")
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_temperature/config"]
-    dhw_mode = json.loads(payloads["homeassistant/sensor/frisquet_bridge/dhw_mode/config"])
-    assert dhw_mode["state_topic"] == "frisquet/boiler/dhwMode"
-    assert "command_topic" not in dhw_mode
-    assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"] == ""
-    assert payloads["homeassistant/sensor/frisquet_bridge/zone1_schedule_raw/config"] == ""
-    assert payloads["homeassistant/switch/frisquet_bridge/zone1_boost/config"] == ""
-    assert "homeassistant/climate/frisquet_bridge/zone1_climate/config" in payloads
-
-
-async def test_discovery_topics_and_entity_metadata(adapter, tmp_path):
-    mqtt, _data, _ops = adapter
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
-    payloads = {topic: json.loads(payload) for topic, payload, _retain in client.published if topic.startswith('homeassistant/') and payload}
-    dhw_temperature = payloads["homeassistant/sensor/frisquet_bridge/dhw_temperature/config"]
-    assert dhw_temperature["availability_topic"] == "frisquet/frisquet_bridge/availability"
-    assert (dhw_temperature["payload_available"], dhw_temperature["payload_not_available"]) == ("online", "offline")
-    assert (dhw_temperature["state_class"], dhw_temperature["suggested_display_precision"]) == ("measurement", 1)
-    assert dhw_temperature["name"] == "Boiler DHW temperature"
-    assert payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]["name"] == (
-        "Boiler heating body safety probe temperature")
-    assert payloads["homeassistant/sensor/frisquet_bridge/dhw_consumption/config"]["state_class"] == "total_increasing"
-    assert payloads["homeassistant/sensor/frisquet_bridge/daily_dhw_consumption/config"]["name"] == "Boiler DHW previous day consumption"
-    assert payloads["homeassistant/sensor/frisquet_bridge/boiler_status/config"]["state_topic"] == "frisquet/boiler/status"
-    climate = payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]
-    assert climate["availability_topic"] == "frisquet/frisquet_bridge/availability"
-    assert climate["name"] == "Zone 1 heating"
-    assert "boost" not in climate["preset_modes"]
-    flow = payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]
-    assert (flow["name"], flow["state_topic"], flow["unique_id"]) == (
-        "Zone 1 flow temperature",
-        "frisquet/z1/flowTemperature",
-        "frisquet_bridge_zone1_flow_temperature",)
-    for payload in payloads.values():
-        assert payload["device"]["identifiers"] == ["frisquet_bridge"]
-        assert payload["origin"] == {"name": "frisquet-bridge"}
-    assert "homeassistant/sensor/frisquet_bridge/zone1_schedule_raw/config" not in payloads
+    _client, components = await _discover(mqtt)
+    assert "select_dhw_mode" not in components and "sensor_dhw_mode" in components
+    assert "mode_command_topic" not in components["climate_zone1_climate"]
 
     mqtt, _data, _satellite, _persisted = _persisting_adapter(tmp_path, "central_boiler", None)
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
-    payloads = {topic: payload for topic, payload, _retain in client.published}
-    for topic in ("homeassistant/switch/frisquet_bridge/central_heat_demand/config", "homeassistant/number/frisquet_bridge/central_setpoint/config",
-        "homeassistant/number/frisquet_bridge/central_demand_on_delta/config", "homeassistant/number/frisquet_bridge/central_demand_off_margin/config",
-        "homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config", "homeassistant/sensor/frisquet_bridge/zone1_flow_setpoint_temperature/config"):
-        assert payloads[topic]
-    for topic in ("homeassistant/climate/frisquet_bridge/zone1_climate/config", "homeassistant/sensor/frisquet_bridge/central_flow_temperature/config",
-        "homeassistant/sensor/frisquet_bridge/central_flow_setpoint_temperature/config"):
-        assert payloads[topic] == ""
+    _client, components = await _discover(mqtt)
+    assert {"switch_central_heat_demand", "number_central_setpoint", "sensor_zone1_flow_temperature"} <= set(components)
+    assert not {"climate_zone1_climate", "number_zone1_reported_ambient", "sensor_dhw_temperature"} & set(components)
 
 
-async def test_discovery_localizes_french_names_and_dhw_options(tmp_path):
-    cfg = _config(tmp_path, "full", "virtual_satellite")
-    cfg.mqtt.language = "fr"
-    mqtt = MqttAdapter(cfg, BoilerData(), FakeOps(), virtual_satellites={1: FakeSatellite()})
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
-    payloads = {topic: json.loads(payload) for topic, payload, _retain in client.published if topic.startswith('homeassistant/') and payload}
-    assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["name"] == "Chaudière mode ECS"
-    assert payloads["homeassistant/select/frisquet_bridge/dhw_mode/config"]["options"] == ["Max", "Eco", "Eco Horaires", "Stop"]
-    safety = payloads["homeassistant/sensor/frisquet_bridge/cdc_safety_temperature/config"]
-    assert safety["name"] == "Chaudière température sonde sécurité CDC"
-    assert payloads["homeassistant/climate/frisquet_bridge/zone1_climate/config"]["name"] == "Zone 1 chauffage"
-    assert payloads["homeassistant/number/frisquet_bridge/zone1_reported_ambient/config"]["name"] == "Zone 1 température ambiante déclarée"
-    assert payloads["homeassistant/sensor/frisquet_bridge/zone1_flow_temperature/config"]["name"] == "Zone 1 température départ"
+async def test_number_discovery_sends_the_sonde_range(tmp_path):
+    # Without min and max, HA limits an MQTT number to 0-100, which rejects any outdoor temperature below 0 °C.
+    cfg = _config(tmp_path, "read")
+    cfg.sonde = SondeConfig(enabled=True, association_id=0x9C, request_id=0)
+    _client, components = await _discover(MqttAdapter(cfg, BoilerData(), None))
+    outside = components["number_outside_temperature"]
+    assert (outside["min"], outside["max"]) == (-30.0, 80.0)
+
+    cfg.zone1 = ZoneConfig(mode="flow_temp", identity=DeviceIdentity(association_id=0xC0, request_id=0), heating_curve_slope=1.6)
+    _client, components = await _discover(MqttAdapter(cfg, BoilerData(), None))
+    assert "number_outside_temperature" not in components
+    target = components["number_flow_target"]
+    assert (target["min"], target["max"], target["command_topic"]) == (19.8, 99.8, "frisquet/flow/target/set")
+
+
+async def test_discovery_migrates_old_topics_and_removes_entities_from_earlier_runs(adapter):
+    mqtt, _data, ops = adapter
+    client, _components = await _discover(mqtt)
+
+    def steps():
+        "What the bridge published since the last call, without availability, with each device config shortened to 'config'"
+        published = [(topic, "config" if topic == DEVICE_TOPIC else payload) for topic, payload, _retain in client.published if "availability" not in topic]
+        client.published.clear()
+        return published
+
+    # A per-entity config from before device discovery: HA keeps the entity if it is migrated before the old topic is cleared.
+    steps()
+    kept = "homeassistant/sensor/frisquet_bridge/dhw_temperature/config"
+    await mqtt.handle_message(client, kept, '{"name": "old"}', retain=True)
+    assert steps() == [(kept, '{"migrate_discovery": true}'), (DEVICE_TOPIC, "config"), (kept, "")]
+    retired = "homeassistant/switch/frisquet_bridge/zone1_boost/config"
+    await mqtt.handle_message(client, retired, '{"name": "old"}', retain=True)
+    assert steps() == [(retired, "")]
+
+    # The retained device config from the previous run lists an entity this run lacks: HA removes it on a platform-only entry.
+    previous = dict(sensor_dhw_temperature=dict(p="sensor", name="DHW"), sensor_retired=dict(p="sensor", name="Retired"))
+    await mqtt.handle_message(client, DEVICE_TOPIC, json.dumps(dict(cmps=previous)), retain=True)
+    configs = [json.loads(payload)["cmps"] for topic, payload, _retain in client.published if topic == DEVICE_TOPIC]
+    assert configs[0]["sensor_retired"] == {"p": "sensor"} and "sensor_retired" not in configs[1]
+
+    # A retained command is an old one: replaying it would undo newer changes.
+    await mqtt.handle_message(client, "frisquet/boiler/dhwMode/set", "Stop", retain=True)
+    assert ops.calls == []
 
 
 async def test_publish_state_values_flow_topics_and_localization(adapter, tmp_path):
@@ -293,16 +277,25 @@ async def test_publish_state_values_flow_topics_and_localization(adapter, tmp_pa
     assert ("frisquet/boiler/status", "Chauffage arrêté", True) in client.published
 
 
-async def test_homeassistant_birth_republishes_discovery_and_availability(adapter):
+async def test_state_goes_out_only_on_change_until_home_assistant_restarts(adapter):
     mqtt, data, _ops = adapter
     data.boiler.status = BoilerStatus.STANDBY
     client = FakeMqttClient()
     await mqtt.publish_discovery(client)
+    await mqtt.publish_state(client)
     client.published.clear()
+    await mqtt.publish_discovery(client)
+    await mqtt.publish_state(client)
+    assert [topic for topic, _payload, _retain in client.published] == ["frisquet/frisquet_bridge/availability"]
 
+    data.boiler.status = BoilerStatus.RUNNING
+    await mqtt.publish_state(client)
+    assert client.published[-1][0] == "frisquet/boiler/status"
+
+    # HA's birth message means it lost its state, so the bridge sends everything again.
+    client.published.clear()
     await mqtt.handle_message(client, "homeassistant/status", "online")
-    assert any(topic == "homeassistant/sensor/frisquet_bridge/dhw_temperature/config" for topic, _payload, _retain in client.published)
-    assert ("frisquet/boiler/status", "Standby", True) in client.published
+    assert {DEVICE_TOPIC, "frisquet/boiler/status"} <= {topic for topic, _payload, _retain in client.published}
 
     await mqtt.publish_offline(client)
     assert ("frisquet/frisquet_bridge/availability", "offline", True) in client.published
@@ -315,12 +308,11 @@ async def test_rf_diagnostics_publish_operation_health_and_zone_source(tmp_path)
     data.rf_health("connect_clock", freshness_seconds=3600.0).record_timeout()
     data.rf_health("satellite_z1_consigne", freshness_seconds=1200.0, zone=1).record_transport_failure()
     mqtt = MqttAdapter(_config(tmp_path), data, None)
-    client = FakeMqttClient()
-    await mqtt.publish_discovery(client)
+    client, components = await _discover(mqtt)
     await mqtt.publish_state(client)
 
     payloads = {topic: payload for topic, payload, _retain in client.published}
-    discovery = json.loads(payloads["homeassistant/sensor/frisquet_bridge/rf_connect_sensors/config"])
+    discovery = components["sensor_rf_connect_sensors"]
     assert discovery["entity_category"] == "diagnostic"
     assert discovery["json_attributes_topic"] == "frisquet/diagnostics/rf/connect_sensors"
 

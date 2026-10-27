@@ -27,15 +27,15 @@ def _ready_zone():
     return data
 
 
-async def test_send_now_skips_unknown_ambient_sends_consigne_and_reports_failure():
+async def test_send_once_skips_unknown_ambient_sends_consigne_and_reports_failure():
     data = BoilerData()
     data.zones[1].mode = ZoneMode.AUTO  # ambient still unknown
     transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
-    assert await _satellite(data, transport).send_now() is False
+    assert await _satellite(data, transport).send_once() is False
     assert transport.sent == []
 
     transport = FakeTransport(init_responses={0x01: _SATELLITE_INFO})
-    assert await _satellite(_ready_zone(), transport).send_now() is True
+    assert await _satellite(_ready_zone(), transport).send_once() is True
     sent = transport.sent[0]
     assert sent.from_addr == ADDR_SATELLITE_Z1
     # read 0xa029/0x15, write 0xa02f/0x04, data len 8.
@@ -51,6 +51,6 @@ async def test_send_now_skips_unknown_ambient_sends_consigne_and_reports_failure
 
     fail_data = _ready_zone()
     transport = FakeTransport(send_raises=TransportError("serial offline"))
-    assert await _satellite(fail_data, transport, on_update=on_update).send_now() is False
+    assert await _satellite(fail_data, transport, on_update=on_update).send_once() is False
     assert updates == 1
     assert fail_data.rf_operations["satellite_z1_consigne"].transport_failures == A029_RETRIES

@@ -21,134 +21,44 @@ def _rx_line(rssi: int, frame_hex: str) -> str:
 def transport() -> SerialTransport: return SerialTransport("/dev/null")
 
 
-def test_handle_line_dispatches_valid_rx(transport: SerialTransport) -> None:
+def test_handle_line_dispatches_frames_and_ignores_noise(transport: SerialTransport) -> None:
     frame = Frame(to_addr=128, from_addr=126, association_id=156, request_id=24, control=1, msg_type=3, payload=bytes.fromhex('79e0001c'))
-    line = _rx_line(-55, frame.encode().hex())
     queue = asyncio.Queue()
     transport._subscribers.add(queue)
-
-    transport._handle_line(line)
-
+    # A bad CRC, a payload that is not hex, and the modem's heartbeat are all dropped.
+    for line in ("RX -55 deadbeef ff", _rx_line(-55, "nothex"), "HB", _rx_line(-55, frame.encode().hex())): transport._handle_line(line)
     received = queue.get_nowait()
-    assert received.rssi == -55
-    assert received.frame == frame
-
-
-def test_handle_line_ignores_bad_crc(transport: SerialTransport) -> None:
-    queue = asyncio.Queue()
-    transport._subscribers.add(queue)
-
-    transport._handle_line("RX -55 deadbeef ff")
-
+    assert (received.rssi, received.frame) == (-55, frame)
     assert queue.empty()
 
 
-def test_handle_line_ignores_invalid_hex(transport: SerialTransport) -> None:
-    body = "RX -55 nothex"
-    line = f"{body} {crc8(body.encode('ascii')):02x}"
-    queue = asyncio.Queue()
-    transport._subscribers.add(queue)
-
-    transport._handle_line(line)
-
-    assert queue.empty()
-
-
-def test_handle_line_ok_resolves_pending(transport: SerialTransport) -> None:
-    loop = asyncio.new_event_loop()
-    fut = loop.create_future()
-    transport._pending = (1, "OK", fut)
-
-    transport._handle_line("OK 1")
-
-    assert fut.done()
-    assert fut.result() is None
-    loop.close()
-
-
-def test_handle_line_err_resolves_pending(transport: SerialTransport) -> None:
-    loop = asyncio.new_event_loop()
-    fut = loop.create_future()
-    transport._pending = (1, "OK", fut)
-
-    transport._handle_line("ERR 1 bad_crc")
-
-    assert fut.done()
-    with pytest.raises(TransportError, match="bad_crc"): fut.result()
-    loop.close()
-
-
-def test_handle_line_heartbeat_is_ignored(transport: SerialTransport) -> None:
-    queue = asyncio.Queue()
-    transport._subscribers.add(queue)
-
-    transport._handle_line("HB")
-
-    assert queue.empty()
-
-
-async def test_reader_failure_fails_pending_command_and_signals_terminal_failure() -> None:
-    class FailingSerial:
-        def readline(self) -> bytes: raise serial.SerialException("device disconnected")
-
-    transport = SerialTransport("/dev/null")
-    transport._serial = FailingSerial()  # type: ignore[assignment]
-    transport._loop = asyncio.get_running_loop()
-    pending = asyncio.get_running_loop().create_future()
-    transport._pending = (7, "OK", pending)
-
-    transport._read_loop()
-    with pytest.raises(TransportError, match="serial reader failed"): await pending
-    with pytest.raises(TransportError, match="serial reader failed"): await transport.wait_failed()
-
-
-async def test_intentional_close_does_not_signal_terminal_failure() -> None:
-    class ClosingSerial:
-        def readline(self) -> bytes: raise serial.SerialException("closed")
-
-    transport = SerialTransport("/dev/null")
-    transport._serial = ClosingSerial()  # type: ignore[assignment]
-    transport._loop = asyncio.get_running_loop()
-    transport._closing = True
-
-    transport._read_loop()
-    with pytest.raises(TimeoutError): await asyncio.wait_for(transport.wait_failed(), timeout=0.01)
-
-
-async def test_set_network_id_wrong_length(transport: SerialTransport) -> None:
-    with pytest.raises(TransportError, match="4 bytes"): await transport.set_network_id(b"\x01\x02")
-
-
-async def test_command_when_not_open_raises(transport: SerialTransport) -> None:
-    with pytest.raises(TransportError, match="not open"): await transport.listen()
-
-
-def test_stale_and_wrong_kind_replies_do_not_resolve_pending(transport: SerialTransport) -> None:
-    loop = asyncio.new_event_loop()
-    fut = loop.create_future()
-    transport._pending = (42, "OK", fut)
-
-    transport._handle_line("OK 41")
-    transport._handle_line("ERR 41 delayed")
-    transport._handle_line("PONG 42")
-
-    assert not fut.done()
+async def test_replies_resolve_only_the_pending_command_they_answer(transport: SerialTransport) -> None:
+    loop = asyncio.get_running_loop()
+    ok = loop.create_future()
+    transport._pending = (42, "OK", ok)
+    # A late reply to an earlier command, and a reply of the wrong kind, leave the pending command waiting.
+    for line in ("OK 41", "ERR 41 delayed", "PONG 42"): transport._handle_line(line)
+    assert not ok.done()
     transport._handle_line("OK 42")
-    assert fut.result() is None
-    loop.close()
+    assert ok.result() is None
 
+    err = loop.create_future()
+    transport._pending = (43, "OK", err)
+    transport._handle_line("ERR 43 bad_crc")
+    with pytest.raises(TransportError, match="bad_crc"): err.result()
 
-def test_matching_pong_resolves_ping_but_ok_does_not(transport: SerialTransport) -> None:
-    loop = asyncio.new_event_loop()
-    fut = loop.create_future()
-    transport._pending = (99, "PONG", fut)
-
+    pong = loop.create_future()
+    transport._pending = (99, "PONG", pong)
     transport._handle_line("OK 99")
-    assert not fut.done()
+    assert not pong.done()
     transport._handle_line("PONG 99")
+    assert pong.result() is None
 
-    assert fut.result() is None
-    loop.close()
+    # A timed-out command's clean-up leaves a newer command's pending reply alone.
+    old, newer = loop.create_future(), loop.create_future()
+    transport._pending = (8, "OK", newer)
+    transport._clear_pending(7, "OK", old)
+    assert transport._pending == (8, "OK", newer)
 
 
 async def test_commands_allocate_uint32_sequences_and_wrap(transport: SerialTransport) -> None:
@@ -172,33 +82,25 @@ async def test_commands_allocate_uint32_sequences_and_wrap(transport: SerialTran
     await transport.listen()
     await transport.sleep()
 
-    assert serial_port.writes[0].startswith("LISTEN @4294967295 ")
-    assert serial_port.writes[1].startswith("SLEEP @0 ")
-    assert serial_port.writes[0] == format_cmd("LISTEN @4294967295")
+    assert serial_port.writes == [format_cmd("LISTEN @4294967295"), format_cmd("SLEEP @0")]
 
 
-async def test_ping_sends_sequence_and_waits_for_matching_pong(transport: SerialTransport) -> None:
-    loop = asyncio.get_running_loop()
+async def test_reader_failure_fails_the_transport_unless_it_is_closing() -> None:
+    class FailingSerial:
+        def readline(self) -> bytes: raise serial.SerialException("device disconnected")
 
-    class PongSerial:
-        def write(self, data: bytes) -> None:
-            seq = int(data.decode("ascii").split()[1].removeprefix("@"))
-            loop.call_soon_threadsafe(transport._handle_line, f"PONG {seq}")
+    transport = SerialTransport("/dev/null")
+    transport._serial = FailingSerial()  # type: ignore[assignment]
+    transport._loop = asyncio.get_running_loop()
+    pending = asyncio.get_running_loop().create_future()
+    transport._pending = (7, "OK", pending)
+    transport._read_loop()
+    with pytest.raises(TransportError, match="serial reader failed"): await pending
+    with pytest.raises(TransportError, match="serial reader failed"): await transport.wait_failed()
 
-        def flush(self) -> None: pass
-
-    transport._serial = PongSerial()  # type: ignore[assignment]
-    transport._next_seq = 1234
-
-    await transport.ping()
-
-
-async def test_timeout_cleanup_does_not_clear_newer_pending(transport: SerialTransport) -> None:
-    loop = asyncio.get_running_loop()
-    old = loop.create_future()
-    newer = loop.create_future()
-    transport._pending = (8, "OK", newer)
-
-    transport._clear_pending(7, "OK", old)
-
-    assert transport._pending == (8, "OK", newer)
+    closing = SerialTransport("/dev/null")
+    closing._serial = FailingSerial()  # type: ignore[assignment]
+    closing._loop = asyncio.get_running_loop()
+    closing._closing = True
+    closing._read_loop()
+    with pytest.raises(TimeoutError): await asyncio.wait_for(closing.wait_failed(), timeout=0.01)

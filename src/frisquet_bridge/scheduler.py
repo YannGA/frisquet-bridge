@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 import structlog
 
 from frisquet_bridge.connect.ops import BoilerOps
-from frisquet_bridge.model import BoilerData
+from frisquet_bridge.model import BoilerData, sonde_temperature
 from frisquet_bridge.types import UpdateNotify
 
 log = structlog.get_logger(__name__)
@@ -80,8 +80,7 @@ class PollScheduler:
         arrives inside the minimum change interval is kept and left for the run
         loop to transmit at the next allowed slot.
         """
-        normalized = max(-30.0, min(80.0, round(temperature * 10) / 10))
-        return await self._attempt_outside_temperature(normalized, is_change=True)
+        return await self._attempt_outside_temperature(sonde_temperature(temperature), is_change=True)
 
     async def _attempt_outside_temperature(self, temperature: float | object = _UNCHANGED, *, only_if_due: bool = False,
         is_change: bool = False) -> bool:
@@ -127,10 +126,11 @@ class PollScheduler:
                 satellite_info_due = float("inf")
                 if self._poll_satellite_info: satellite_info_due = now + self._satellite_info_interval
             if self._poll_connect and self._ops is not None and now >= slow_due:
+                # The clock goes first: the daily counters are stamped with the boiler time they were read at.
+                await self._safe_poll("clock", lambda: self._ops.read_clock(self._data))
                 await self._safe_poll("consumption", lambda: self._ops.read_consumption(self._data))
                 await self._safe_poll("daily_consumption", lambda: self._ops.read_daily_consumption(self._data))
                 await self._safe_poll("dhw_mode", lambda: self._ops.read_dhw_mode(self._data))
-                await self._safe_poll("clock", lambda: self._ops.read_clock(self._data))
                 slow_due = now + SLOW_INTERVAL
             if (self._push_outside_temperature and self._sonde_ops is not None and self._data.sonde.outside_temperature is not None
                 and now >= self._outside_temperature_due):

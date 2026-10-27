@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack
 
 import aiomqtt, structlog
 
+from frisquet_bridge.boiler_profile import flow_temp_outdoor
 from frisquet_bridge.config import BridgeConfig
 from frisquet_bridge.connect.client import FrisquetClient
 from frisquet_bridge.connect.ops import BoilerOps
@@ -17,7 +18,7 @@ from frisquet_bridge.logging import RawMessageRecorder
 from frisquet_bridge.model import BoilerData, ZoneSource
 from frisquet_bridge.mqtt.adapter import DEVICE_ID, MqttAdapter
 from frisquet_bridge.satellite import VirtualSatellite
-from frisquet_bridge.scheduler import PollScheduler
+from frisquet_bridge.scheduler import OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL, PollScheduler
 from frisquet_bridge.state_store import load_zone_state, save_zone_state
 from frisquet_bridge.transport.serial import SerialTransport
 
@@ -140,10 +141,15 @@ class BridgeService:
                 mirror = PassiveMirror(self.data, boiler_addr=self.cfg.boiler_addr, on_update=publish_mqtt,
                     on_zone_config=lambda: save_zone_state(self.cfg.state_path, self.data))
 
+            # In flow_temp mode the bridge derives the sonde value from the persisted flow target. Changes skip the rate limit.
+            flow_slope = self.cfg.flow_temp_slope
+            flow_target = self.data.zones[1].flow_target
+            if flow_slope is not None and flow_target is not None: self.data.sonde.outside_temperature = flow_temp_outdoor(flow_target, flow_slope)
             poll_connect = connect_ops is not None and self.cfg.connect_reads_enabled
             poll_satellite_info = _has_read_only_satellite_zone(self.cfg, enabled_zones)
             scheduler = PollScheduler(connect_ops, self.data, poll_connect=poll_connect, poll_satellite_info=poll_satellite_info,
                 sonde_ops=sonde_ops, push_outside_temperature=self.cfg.sonde is not None and self.cfg.sonde.enabled,
+                outside_temperature_min_change_interval=OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL if flow_slope is None else 0.0,
                 sensor_interval=self.cfg.sensor_poll_interval_seconds, enabled_zones=enabled_zones, on_update=publish_mqtt)
 
             if self.cfg.mqtt.enabled:
@@ -157,7 +163,6 @@ class BridgeService:
                 adapter = MqttAdapter(self.cfg, self.data, connect_ops, sonde_ops=sonde_ops,
                     outside_temperature_writer=scheduler.send_outside_temperature_now, virtual_satellites=virtual_satellites,
                     on_state_change=publish_mqtt, on_persist_state=lambda: save_zone_state(self.cfg.state_path, self.data))
-                await adapter.publish_discovery(mqtt_client)
 
             async def rf_loop() -> None:
                 async for received in transport.frames():

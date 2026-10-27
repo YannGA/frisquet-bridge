@@ -36,9 +36,10 @@ def _write_payload(path: Path, payload: dict[str, object]) -> None:
 
 def _serialize_zone(zone: ZoneState) -> dict[str, object] | None:
     zone_temperatures = (zone.comfort_temperature, zone.reduced_temperature, zone.frost_temperature, zone.reported_ambient)
-    central_values = (zone.central_setpoint, zone.central_demand, zone.central_demand_on_delta, zone.central_demand_off_margin)
+    profile_values = (zone.central_setpoint, zone.central_demand, zone.central_demand_on_delta, zone.central_demand_off_margin,
+        zone.flow_demand, zone.flow_target)
     mode_values = (zone.mode, zone.mode_options, zone.auto_comfort)
-    if (zone.schedule is None and all(value is None for value in zone_temperatures) and all(value is None for value in central_values)
+    if (zone.schedule is None and all(value is None for value in zone_temperatures) and all(value is None for value in profile_values)
         and all(value is None for value in mode_values) and not zone.override and not zone.boost): return None
     schedule_hex = None
     if zone.schedule is not None: schedule_hex = b"".join(zone.schedule.days[day] for day in SCHEDULE_DAYS).hex()
@@ -46,7 +47,8 @@ def _serialize_zone(zone: ZoneState) -> dict[str, object] | None:
         override=zone.override, boost=zone.boost, comfort_temperature=zone.comfort_temperature,
         reduced_temperature=zone.reduced_temperature, frost_temperature=zone.frost_temperature, reported_ambient=zone.reported_ambient,
         schedule=schedule_hex, central_setpoint=zone.central_setpoint, central_demand=zone.central_demand,
-        central_demand_on_delta=zone.central_demand_on_delta, central_demand_off_margin=zone.central_demand_off_margin)
+        central_demand_on_delta=zone.central_demand_on_delta, central_demand_off_margin=zone.central_demand_off_margin,
+        flow_demand=zone.flow_demand, flow_target=zone.flow_target)
 
 
 def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
@@ -65,9 +67,10 @@ def _apply_zone(zone: ZoneState, raw: dict[str, object]) -> None:
         if isinstance(value, int | float) and not isinstance(value, bool): setattr(zone, attr, float(value))
     reported_ambient = raw.get("reported_ambient")
     if isinstance(reported_ambient, int | float) and not isinstance(reported_ambient, bool): zone.reported_ambient = float(reported_ambient)
-    central_demand = raw.get("central_demand")
-    if isinstance(central_demand, bool): zone.central_demand = central_demand
-    for attr in ("central_setpoint", "central_demand_on_delta", "central_demand_off_margin"):
+    for attr in ("central_demand", "flow_demand"):
+        value = raw.get(attr)
+        if isinstance(value, bool): setattr(zone, attr, value)
+    for attr in ("central_setpoint", "central_demand_on_delta", "central_demand_off_margin", "flow_target"):
         value = raw.get(attr)
         if isinstance(value, int | float) and not isinstance(value, bool): setattr(zone, attr, float(value))
     schedule = raw.get("schedule")
