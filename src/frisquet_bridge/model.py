@@ -9,11 +9,13 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 # Sentinel the boiler uses for "outside temperature not available".
 OUTSIDE_TEMP_ABSENT = 129.0
+SONDE_MIN_TEMPERATURE = -30.0
+SONDE_MAX_TEMPERATURE = 80.0
 
 
 class DhwMode(StrEnum):
@@ -140,6 +142,7 @@ class BoilerState:
     heating_consumption: int | None = None
     daily_dhw_consumption: int | None = None
     daily_heating_consumption: int | None = None
+    daily_consumption_read_at: str | None = None # boiler clock when the previous-day counters were read
     dhw_mode: DhwMode | None = None
     dhw_frame_bits: int = 0
     status: BoilerStatus | None = None
@@ -171,11 +174,30 @@ class ZoneState:
     central_demand: bool | None = None
     central_demand_on_delta: float | None = None
     central_demand_off_margin: float | None = None
+    flow_demand: bool | None = None
+    flow_target: float | None = None
 
 
 @dataclass
 class SondeState:
     outside_temperature: float | None = None
+
+
+def sonde_temperature(temperature: float) -> float:
+    "Round to the sonde's 0.1 °C resolution and clamp to the range it can encode"
+    return max(SONDE_MIN_TEMPERATURE, min(SONDE_MAX_TEMPERATURE, round(temperature * 10) / 10))
+
+
+# HA's history from 17 to 26 October 2026 shows each day's new counter value by 00:54 boiler time. 03:00 leaves room for missed reads.
+DAILY_COUNTERS_SETTLED_HOUR = 3
+
+
+def daily_consumption_reset(read_at: str | None) -> str | None:
+    "Start of the day the previous-day counters cover, from the boiler time they were read at. None before the counters have surely rolled over"
+    if read_at is None: return None
+    seen = datetime.fromisoformat(read_at)
+    if seen.hour < DAILY_COUNTERS_SETTLED_HOUR: return None
+    return (datetime(seen.year, seen.month, seen.day) - timedelta(days=1)).astimezone().isoformat()
 
 
 @dataclass

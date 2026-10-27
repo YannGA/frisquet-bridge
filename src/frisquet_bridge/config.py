@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import tomlkit
@@ -18,9 +18,10 @@ class ConfigError(ValueError):
 
 
 CONNECT_MODES = {"passive", "read", "full"}
-ZONE_MODES = {"disabled", "satellite", "virtual_satellite", "simple_satellite", "central_boiler"}
-SATELLITE_IDENTITY_MODES = {"virtual_satellite", "simple_satellite", "central_boiler"}
-VIRTUAL_SATELLITE_MODES = {"virtual_satellite", "simple_satellite", "central_boiler"}
+ZONE_MODES = {"disabled", "satellite", "virtual_satellite", "simple_satellite", "central_boiler", "flow_temp"}
+# Modes where the bridge emulates the zone's satellite, and so needs its association identity.
+VIRTUAL_SATELLITE_MODES = {"virtual_satellite", "simple_satellite", "central_boiler", "flow_temp"}
+ZONE1_ONLY_MODES = {"central_boiler", "flow_temp"}
 LOG_FORMATS = {"console", "json"}
 LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 MQTT_LANGUAGES = {"en", "fr"}
@@ -85,12 +86,10 @@ class SondeConfig(DeviceIdentity):
 class ZoneConfig:
     mode: str
     identity: DeviceIdentity | None = None
+    heating_curve_slope: float | None = None # flow_temp only: the slope set on the boiler
 
     @property
     def enabled(self) -> bool: return self.mode != "disabled"
-
-    @property
-    def uses_satellite(self) -> bool: return self.mode in SATELLITE_IDENTITY_MODES
 
     @property
     def uses_virtual_satellite(self) -> bool: return self.mode in VIRTUAL_SATELLITE_MODES
@@ -100,6 +99,9 @@ class ZoneConfig:
 
     @property
     def is_central_boiler(self) -> bool: return self.mode == "central_boiler"
+
+    @property
+    def is_flow_temp(self) -> bool: return self.mode == "flow_temp"
 
     @property
     def is_read_only_satellite(self) -> bool: return self.mode == "satellite"
@@ -143,6 +145,11 @@ class BridgeConfig:
 
     @property
     def boiler_entities_enabled(self) -> bool: return self.connect is not None
+
+    @property
+    def flow_temp_slope(self) -> float | None:
+        'Heating-curve slope when zone 1 runs in flow_temp mode, else None'
+        return self.zone1.heating_curve_slope if self.zone1 is not None else None
 
     def protocol_state_kwargs(self, role: str) -> dict[str, object]:
         return self.identity(role).state_kwargs(self.network_id, self._persist_request_id(role))
@@ -202,8 +209,7 @@ class BridgeConfig:
         if role in {"satellite_z1", "satellite_z2", "satellite_z3"}:
             n = int(role[-1])
             current = self.zone(n)
-            mode = current.mode if current else "virtual_satellite"
-            setattr(self, f"zone{n}", ZoneConfig(mode=mode, identity=identity))
+            setattr(self, f"zone{n}", replace(current, identity=identity) if current else ZoneConfig(mode="virtual_satellite", identity=identity))
             save_protocol_request_id(self.state_path, role, request_id)
             return
         raise ConfigError(f"unknown identity role: {role}")
@@ -345,6 +351,7 @@ def _zone_table(zone: ZoneConfig) -> tomlkit.items.Table:
     table = tomlkit.table()
     table.add("mode", zone.mode)
     if zone.identity is not None: table.add("association_id", f"{zone.identity.association_id:02x}")
+    if zone.heating_curve_slope is not None: table.add("heating_curve_slope", zone.heating_curve_slope)
     return table
 
 
@@ -370,23 +377,29 @@ def _load_identity(table: dict[str, object], field_name: str) -> DeviceIdentity:
 def _load_zone(
     table: dict[str, object],
     field_name: str,
-    zone_number: int, # 1, 2 or 3; central_boiler is only valid on zone1
+    zone_number: int, # 1, 2 or 3; ZONE1_ONLY_MODES are only valid on zone1
 ) -> ZoneConfig:
-    _validate_keys(table, {"mode", "association_id"}, field_name)
+    _validate_keys(table, {"mode", "association_id", "heating_curve_slope"}, field_name)
     mode = _parse_zone_mode(_required_str(table, "mode", f"{field_name}.mode"), f"{field_name}.mode")
-    if mode == "central_boiler" and zone_number != 1:
-        raise ConfigError(f"{field_name}.mode: central_boiler is only valid on frisquet.zone1")
+    if mode in ZONE1_ONLY_MODES and zone_number != 1: raise ConfigError(f"{field_name}.mode: {mode} is only valid on frisquet.zone1")
     identity = _load_identity(table, field_name) if "association_id" in table else None
-    if mode in SATELLITE_IDENTITY_MODES and identity is None: raise ConfigError(f"missing required field: {field_name}.association_id")
-    return ZoneConfig(mode=mode, identity=identity)
+    if mode in VIRTUAL_SATELLITE_MODES and identity is None: raise ConfigError(f"missing required field: {field_name}.association_id")
+    slope = table.get("heating_curve_slope")
+    if mode == "flow_temp":
+        if slope is None: raise ConfigError(f"missing required field: {field_name}.heating_curve_slope")
+        slope = _positive_float(slope, f"{field_name}.heating_curve_slope")
+    elif slope is not None: raise ConfigError(f"{field_name}.heating_curve_slope: only valid with mode = \"flow_temp\"")
+    return ZoneConfig(mode=mode, identity=identity, heating_curve_slope=slope)
 
 
 def _validate_zone_topology(cfg: BridgeConfig) -> None:
-    if cfg.zone1 is None or not cfg.zone1.is_central_boiler: return
+    if cfg.zone1 is None or cfg.zone1.mode not in ZONE1_ONLY_MODES: return
     for n in (2, 3):
         zone = cfg.zone(n)
         if zone is not None and zone.enabled:
-            raise ConfigError(f"frisquet.zone{n}.mode: central_boiler on zone1 requires zone{n} to be disabled")
+            raise ConfigError(f"frisquet.zone{n}.mode: {cfg.zone1.mode} on zone1 requires zone{n} to be disabled")
+    if cfg.zone1.is_flow_temp and (cfg.sonde is None or not cfg.sonde.enabled):
+        raise ConfigError("frisquet.zone1.mode: flow_temp requires frisquet.sonde with enabled = true")
 
 
 def _validate_logging(config: LoggingConfig) -> None:

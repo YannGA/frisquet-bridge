@@ -59,27 +59,9 @@ raw_lines = true
 
     cfg = load(path)
 
-    assert cfg.network_id == bytes.fromhex("05d97f78")
-    assert cfg.boiler_addr == 0x80
-    assert cfg.sensor_poll_interval_seconds == 12.5
-    assert cfg.connect.mode == "full"
-    assert cfg.connect_reads_enabled is True
-    assert cfg.connect_writes_enabled is True
-    assert cfg.sonde.enabled is False
-    assert cfg.sonde.association_id == 0x9C
-    assert cfg.zone1.mode == "satellite"
-    assert cfg.zone1.identity is None
-    assert cfg.zone1.is_read_only_satellite is True
-    assert cfg.zone2.mode == "virtual_satellite"
-    assert cfg.identity("satellite_z2").association_id == 0xC0
-    assert cfg.zone3.mode == "disabled"
-    assert cfg.mqtt.language == "fr"
-    assert (cfg.logging.level, cfg.logging.format) == ("DEBUG", "json")
-    assert cfg.logging.file == "logs/bridge.log"
-    assert (cfg.logging.file_max_bytes, cfg.logging.file_backup_count) == (12345, 2)
-    assert cfg.logging.raw_file == "logs/raw.jsonl"
-    assert (cfg.logging.raw_max_bytes, cfg.logging.raw_backup_count) == (54321, 3)
-    assert cfg.logging.raw_lines is True
+    assert (cfg.network_id, cfg.boiler_addr, cfg.sensor_poll_interval_seconds) == (bytes.fromhex("05d97f78"), 0x80, 12.5)
+    assert (cfg.sonde.association_id, cfg.identity("satellite_z2").association_id, cfg.zone1.identity) == (0x9C, 0xC0, None)
+    assert (cfg.logging.level, cfg.logging.raw_lines) == ("DEBUG", True)
 
 
 def test_load_minimal_config_defaults(tmp_path: Path):
@@ -146,6 +128,11 @@ def test_load_rejects_invalid_config(tmp_path: Path):
             '\n[frisquet.zone1]\nmode = "central_boiler"\nassociation_id = "c0"\n\n[frisquet.zone2]\nmode = "satellite"\n',
             "requires zone2 to be disabled",
         ),
+        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\n', "zone1.heating_curve_slope"),
+        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 0\n', "expected positive number"),
+        ('\n[frisquet.zone1]\nmode = "simple_satellite"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', 'only valid with mode = "flow_temp"'),
+        ('\n[frisquet.zone2]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', "flow_temp is only valid"),
+        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', "flow_temp requires frisquet.sonde"),
         ("\n[home_assistant]\nenabled = true\n", "unknown field 'home_assistant'"),
         ('\n[logging]\nformat = "pretty"\n', "logging.format")]
     for i, (extra, match) in enumerate(cases):

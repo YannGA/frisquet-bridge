@@ -15,7 +15,7 @@ from frisquet_bridge.connect.decode import (ADDR_CONSUMPTION, ADDR_DAILY_CONSUMP
     ADDR_SENSORS, ADDR_ZONE_CONFIG, decode_clock, decode_consumption, decode_daily_consumption, decode_dhw_mode, decode_satellite_init_response,
     decode_sensors, encode_satellite_mode, memory_address)
 from frisquet_bridge.frame import ADDR_SATELLITE_Z1, MSG_INIT, MSG_SONDE_INIT
-from frisquet_bridge.model import SCHEDULE_DAYS, BoilerData, DhwMode, ZoneMode, ZoneState
+from frisquet_bridge.model import SCHEDULE_DAYS, BoilerData, DhwMode, ZoneMode, ZoneState, sonde_temperature
 from frisquet_bridge.transport.base import TransportError
 
 ZONE_ADDR = ADDR_ZONE_CONFIG
@@ -292,7 +292,7 @@ class BoilerOps:
         raise ValueError(f"zone {zone}: override must be one of none, comfort, reduced")
 
     async def write_outside_temperature(self, data: BoilerData, temperature: float) -> None:
-        temp = max(-30.0, min(80.0, round(temperature * 10) / 10))
+        temp = sonde_temperature(temperature)
         body = SONDE_TEMP_PREFIX + encode_temp16(temp)
 
         async def request_and_decode() -> None:

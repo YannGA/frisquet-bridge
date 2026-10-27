@@ -1,24 +1,12 @@
 # frisquet-bridge
 
-`frisquet-bridge` gives a Frisquet Eco Radio Visio boiler a local Home
-Assistant interface. It uses a small RF modem and a Python service to publish
-MQTT discovery entities and send boiler commands over the Frisquet radio link.
+`frisquet-bridge` connects a Frisquet Eco Radio Visio boiler to Home Assistant locally, over the boiler's own radio link. A small RF modem talks to the boiler. A Python service on a Linux host keeps the boiler's state, publishes it as MQTT discovery entities and sends Home Assistant's commands to the boiler.
 
-The main goal is a simple control path. You do not need to run the official
-Frisquet Connect box, or copy all of its behavior, just to let Home Assistant
-set eco mode when everyone leaves. Home Assistant can own the schedules,
-away-mode rules, TRV demand, and virtual outside temperature. The bridge stays
-small: it talks radio, keeps state, and exposes the pieces Home Assistant needs.
+You do not need the official Frisquet Connect box, or a copy of all its behavior, just to let Home Assistant set eco mode when everyone leaves. Home Assistant can own the heating logic: schedules, away rules, TRV demand and the virtual outside temperature. The bridge handles the radio, keeps the boiler's state and exposes the entities Home Assistant needs.
 
-You can still observe or bridge a real Frisquet Connect setup. The project
-supports passive listening, read-only boiler polling, Connect-style commands,
-virtual satellites, simple Home Assistant-owned satellites, and a central-boiler
-mode for TRV/VTherm installations.
+Each heating zone runs in one mode. The bridge can listen to a physical satellite, replace it with a full or a simplified climate entity, turn TRV demand into one boiler demand switch, or take a flow temperature target from a controller in Home Assistant. It can also work next to a real Frisquet Connect box, by listening passively, polling the boiler read-only or sending Connect-style commands.
 
-It builds on the protocol work from
-[frisquet-connect](https://github.com/d33d33/frisquet-connect) and the feature
-coverage of [OpenFrisquetVisio](https://github.com/freedomnx/OpenFrisquetVisio),
-with a split between the RF modem and the host service:
+It builds on the protocol work from [frisquet-connect](https://github.com/d33d33/frisquet-connect) and the feature coverage of [OpenFrisquetVisio](https://github.com/freedomnx/OpenFrisquetVisio). The work splits between the RF modem and the host service:
 
 | Layer | Where it runs |
 |-------|----------------|
@@ -69,9 +57,7 @@ To watch the modem:
 pio device monitor
 ```
 
-At boot it prints `READY frisquet-bridge-fw 1.0.0`. If you opened the monitor
-late, press `RESET` on the Feather. In listen mode, `HB` appears every 30
-seconds.
+At boot it prints `READY frisquet-bridge-fw 1.0.0`. If you opened the monitor late, press `RESET` on the Feather. In listen mode, `HB` appears every 30 seconds.
 
 ### 3. Install the Python service
 
@@ -93,9 +79,7 @@ Or pass the network id directly:
 uv run frisquet-bridge listen --network-id 05d97f78
 ```
 
-`--promiscuous` uses sync word `ffffffff`, which is useful for pairing traffic.
-It is not a wildcard for every Frisquet network. Normal traffic still needs the
-right sync word.
+`--promiscuous` uses sync word `ffffffff`, which is useful for pairing traffic. It is not a wildcard for every Frisquet network. Normal traffic still needs the right sync word.
 
 ## Configure the bridge
 
@@ -106,10 +90,7 @@ cp config.toml.example config.toml
 $EDITOR config.toml
 ```
 
-Set your serial port, MQTT broker, Frisquet network id, boiler address, and
-association ids. Home Assistant needs the MQTT integration enabled first. The
-bridge publishes MQTT discovery messages under `base_topic`, usually
-`frisquet`.
+Set your serial port, MQTT broker, Frisquet network id, boiler address, and association ids. Home Assistant needs the MQTT integration enabled first. The bridge publishes MQTT discovery messages under `base_topic`, usually `frisquet`.
 
 Pair the identities you need while the boiler is in association mode:
 
@@ -119,10 +100,7 @@ uv run frisquet-bridge pair sonde --config config.toml
 uv run frisquet-bridge pair satellite_z1 --config config.toml
 ```
 
-Use only the identities your setup needs. The Connect identity is used for
-boiler reads and Connect-style commands. The `sonde` identity is for the virtual
-outside temperature. Satellite identities are needed when the bridge owns a
-heating zone.
+Use only the identities your setup needs. The Connect identity is used for boiler reads and Connect-style commands. The `sonde` identity is for the virtual outside temperature. Satellite identities are needed when the bridge owns a heating zone.
 
 Useful one-off commands:
 
@@ -150,10 +128,7 @@ For every setting, see [docs/CONFIG.md](docs/CONFIG.md).
 
 ## Operating modes
 
-`[frisquet.connect] mode = "passive"` observes a real Connect box without
-transmitting as one. `mode = "read"` polls boiler state but keeps writes off.
-`mode = "full"` also allows DHW writes and commands relayed through the normal
-Connect path.
+`[frisquet.connect] mode = "passive"` observes a real Connect box without transmitting as one. `mode = "read"` polls boiler state but keeps writes off. `mode = "full"` also allows DHW writes and commands relayed through the normal Connect path.
 
 Pick one mode per zone:
 
@@ -164,25 +139,17 @@ Pick one mode per zone:
 | `virtual_satellite` | The bridge replaces a satellite with the full climate surface. |
 | `simple_satellite` | The bridge owns the zone and Home Assistant owns scheduling. |
 | `central_boiler` | Zone 1 proxies boiler demand for TRV/VTherm setups. |
+| `flow_temp` | A controller in Home Assistant sets the boiler's flow temperature. Zone 1 only, with the boiler in outdoor-only regulation. |
 
-The simplest Home Assistant-first setup is usually `simple_satellite`: expose
-heat/off, comfort/eco, target temperature, and ambient temperature, then keep
-automation logic in Home Assistant. `central_boiler` is for a single demand
-switch driven by TRVs or virtual thermostats.
+For most Home Assistant setups, start with `simple_satellite`. It exposes heat/off, comfort/eco, the target temperature and the room temperature. Home Assistant runs the automations. Use `central_boiler` when TRVs or virtual thermostats decide when the house needs heat. Zone 1 then exposes a single demand switch. Use `flow_temp` when a controller in Home Assistant sets the flow temperature itself. It needs a paired sonde and the boiler in outdoor-only regulation. [docs/CONFIG.md](docs/CONFIG.md#flow_temp) describes the boiler setup.
 
-Bridge-owned zone modes need an `association_id` in that zone. Runtime values
-such as request ids, learned setpoints, and central-boiler tuning live in
-`config.state.json`, not in `config.toml`.
+Bridge-owned zone modes need an `association_id` in that zone. Runtime values such as request ids, learned setpoints, central-boiler tuning and the `flow_temp` switch and target live in `config.state.json`, not in `config.toml`.
 
-In Home Assistant, look for the MQTT-discovered device named `Frisquet Bridge`.
-The entities depend on the configured modes: boiler sensors, outside
-temperature, zone climates, or central-boiler demand and tuning numbers.
+In Home Assistant, look for the MQTT-discovered device named `Frisquet Bridge`. The entities depend on the configured modes: boiler sensors, outside temperature, zone climates, central-boiler demand and tuning numbers, or the flow temperature switch and target.
 
 ## Systemd deployment
 
-The sample unit in [deploy/frisquet-bridge.service](deploy/frisquet-bridge.service)
-runs the entry point from `.venv` by absolute path. Create the environment
-before starting the service:
+The sample unit in [deploy/frisquet-bridge.service](deploy/frisquet-bridge.service) runs the entry point from `.venv` by absolute path. Create the environment before starting the service:
 
 ```bash
 uv sync --locked --no-dev
