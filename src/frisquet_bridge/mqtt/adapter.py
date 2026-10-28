@@ -26,6 +26,7 @@ CLIMATE_MIN_TEMP = 5
 CLIMATE_MAX_TEMP = 30
 CLIMATE_TEMP_STEP = 0.5
 DHW_PENDING_SECONDS = 20.0
+FALLBACK_SECONDS = 1800.0 # How long HA's MQTT status must stay offline before flow_temp falls back to its fallback flow
 
 MQTT_PRESET_MODES = tuple(preset for preset in PRESET_MODES if preset != PRESET_BOOST)
 
@@ -168,6 +169,8 @@ class MqttAdapter:
         self._pending_dhw_until = 0.0
         self._last_published_dhw_mode = None
         self._publish_lock = asyncio.Lock()
+        self._ha_offline_since = None # monotonic time at which HA's MQTT status turned offline
+        self._falling_back = False
 
     def _topic(self, suffix: str) -> str: return f"{self._base}/{suffix}"
 
@@ -456,10 +459,12 @@ class MqttAdapter:
         body = payload.strip()
         if topic == "homeassistant/status":
             if body == "online":
+                self._ha_offline_since, self._falling_back = None, False
                 self._published_state.clear()
                 await self.publish_discovery(client, force=True)
                 await self.publish_state(client)
                 log.info("mqtt_homeassistant_birth_handled")
+            elif body == "offline" and self._ha_offline_since is None: self._ha_offline_since = time.monotonic()
             return
         if topic == DEVICE_TOPIC:
             # The bridge's own config from its previous run lists the entities to remove if this run no longer has them.
@@ -505,17 +510,30 @@ class MqttAdapter:
         if curve is None:
             log.warning("mqtt_command_ignored", command=command)
             return
-        zone = self._data.zones[1]
-        if command == "demand":
-            zone.flow_demand = _parse_bool(payload)
-            self._persist_state()
-            satellite = self._virtual.get(1)
-            if satellite is not None: satellite.request_send()
-            return
-        low, high = flow_temp_range(curve)
-        zone.flow_target = min(max(round(float(payload), 1), low), high)
+        if command == "demand": await self._set_flow(demand=_parse_bool(payload))
+        else: await self._set_flow(target=float(payload))
+
+    async def _set_flow(self, demand: bool | None = None, target: float | None = None) -> None:
+        "Set zone 1's flow demand through its satellite and its flow target as a virtual outdoor temperature; None leaves either as it is"
+        curve, zone = self._cfg.flow_curve, self._data.zones[1]
+        if demand is not None: zone.flow_demand = demand
+        if target is not None:
+            low, high = flow_temp_range(curve)
+            zone.flow_target = min(max(round(target, 1), low), high)
         self._persist_state()
-        if self._outside_temperature_writer is not None: await self._outside_temperature_writer(flow_temp_outdoor(zone.flow_target, curve.slope))
+        if demand is not None and (satellite := self._virtual.get(1)) is not None: satellite.request_send()
+        if target is not None and self._outside_temperature_writer is not None:
+            await self._outside_temperature_writer(flow_temp_outdoor(zone.flow_target, curve.slope))
+
+    async def check_fallback(self, now: float | None = None) -> None:
+        "Heat zone 1 at its fallback flow once Home Assistant's MQTT status has been offline for `FALLBACK_SECONDS`"
+        zone_cfg = self._cfg.zone1
+        fallback = zone_cfg.fallback_flow if zone_cfg is not None and self._cfg.flow_curve is not None else None
+        if fallback is None or self._ha_offline_since is None or self._falling_back: return
+        if (time.monotonic() if now is None else now)-self._ha_offline_since < FALLBACK_SECONDS: return
+        self._falling_back = True
+        log.warning("flow_fallback", flow=fallback)
+        await self._set_flow(demand=True, target=fallback)
 
     async def _handle_connect_zone_command(
         self,

@@ -95,6 +95,7 @@ class ZoneConfig:
     mode: str
     identity: DeviceIdentity | None = None
     heating_curve: HeatingCurve | None = None # As set on the boiler; required by flow_temp
+    fallback_flow: float | None = None # flow_temp only: the flow the bridge falls back to while HA is offline
 
     @property
     def enabled(self) -> bool: return self.mode != "disabled"
@@ -359,6 +360,7 @@ def _zone_table(zone: ZoneConfig) -> tomlkit.items.Table:
     table = tomlkit.table()
     table.add("mode", zone.mode)
     if zone.identity is not None: table.add("association_id", f"{zone.identity.association_id:02x}")
+    if zone.fallback_flow is not None: table.add("fallback_flow", zone.fallback_flow)
     if zone.heating_curve is not None: table.add("heating_curve", _heating_curve_table(zone.heating_curve))
     return table
 
@@ -393,7 +395,7 @@ def _load_zone(
     field_name: str,
     zone_number: int, # 1, 2 or 3; ZONE1_ONLY_MODES are only valid on zone1
 ) -> ZoneConfig:
-    _validate_keys(table, {"mode", "association_id", "heating_curve"}, field_name)
+    _validate_keys(table, {"mode", "association_id", "heating_curve", "fallback_flow"}, field_name)
     mode = _parse_zone_mode(_required_str(table, "mode", f"{field_name}.mode"), f"{field_name}.mode")
     if mode in ZONE1_ONLY_MODES and zone_number != 1: raise ConfigError(f"{field_name}.mode: {mode} is only valid on frisquet.zone1")
     identity = _load_identity(table, field_name) if "association_id" in table else None
@@ -401,7 +403,13 @@ def _load_zone(
     curve_table = _optional_table(table, "heating_curve")
     curve = _load_heating_curve(curve_table, f"{field_name}.heating_curve") if curve_table is not None else None
     if mode == "flow_temp" and curve is None: raise ConfigError(f"missing required table: {field_name}.heating_curve")
-    return ZoneConfig(mode=mode, identity=identity, heating_curve=curve)
+    fallback = table.get("fallback_flow")
+    if fallback is not None:
+        if mode != "flow_temp": raise ConfigError(f'{field_name}.fallback_flow: only valid with mode = "flow_temp"')
+        fallback = _positive_float(fallback, f"{field_name}.fallback_flow")
+        if not curve.min_flow <= fallback <= curve.max_flow:
+            raise ConfigError(f"{field_name}.fallback_flow: expected a flow between min_flow and max_flow")
+    return ZoneConfig(mode=mode, identity=identity, heating_curve=curve, fallback_flow=fallback)
 
 
 def _load_heating_curve(table: dict[str, object], field_name: str) -> HeatingCurve:

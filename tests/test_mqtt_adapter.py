@@ -1,6 +1,6 @@
 'Tests for MQTT command mapping and the Home Assistant MQTT contract.'
 
-import asyncio, json
+import asyncio, json, time
 
 import pytest
 
@@ -213,6 +213,32 @@ async def test_number_discovery_sends_the_sonde_range(tmp_path):
     assert "number_outside_temperature" not in components
     target = components["number_flow_target"]
     assert (target["min"], target["max"], target["command_topic"]) == (20.0, 65.0, "frisquet/flow/target/set")
+
+
+async def test_flow_temp_falls_back_once_home_assistant_has_been_offline_for_30_minutes(tmp_path):
+    # HA's integration writes only on change, so silence means nothing; HA's own MQTT will message says it is gone.
+    writes = []
+
+    async def write_outside_temperature(temperature):
+        writes.append(temperature)
+        return True
+
+    cfg, data, satellite, client = _config(tmp_path), BoilerData(), FakeSatellite(), FakeMqttClient()
+    cfg.zone1 = ZoneConfig(mode="flow_temp", identity=DeviceIdentity(association_id=0xC0, request_id=0),
+        heating_curve=HeatingCurve(slope=1.5, min_flow=20.0, max_flow=65.0), fallback_flow=45.0)
+    mqtt = MqttAdapter(cfg, data, None, outside_temperature_writer=write_outside_temperature, virtual_satellites={1: satellite})
+    await mqtt.handle_message(client, "homeassistant/status", "offline")
+    start = time.monotonic()
+    await mqtt.check_fallback(start+1799)
+    assert (data.zones[1].flow_demand, writes) == (None, [])
+    await mqtt.check_fallback(start+1800)
+    assert (data.zones[1].flow_demand, data.zones[1].flow_target, satellite.sends) == (True, 45.0, 1)
+    assert writes == [pytest.approx(20-(45-19.8)/1.5)]
+    await mqtt.check_fallback(start+1900)
+    assert satellite.sends == 1
+    await mqtt.handle_message(client, "homeassistant/status", "online")
+    await mqtt.check_fallback(start+7200)
+    assert satellite.sends == 1
 
 
 async def test_discovery_migrates_old_topics_and_removes_entities_from_earlier_runs(adapter):

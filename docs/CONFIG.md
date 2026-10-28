@@ -60,6 +60,7 @@ When enabled, Home Assistant gets an outside-temperature number entity. Writes a
 | `mode` | One of `disabled`, `satellite`, `virtual_satellite`, `simple_satellite`, `central_boiler`, `flow_temp`. |
 | `association_id` | Required only when the bridge emulates the satellite: `virtual_satellite`, `simple_satellite`, `central_boiler`, or `flow_temp`. |
 | `heating_curve` | Table with the heating curve set on the boiler for this zone: `slope` (the coefficient k), `min_flow` and `max_flow` (flow temperatures in °C). All three keys are required, and `min_flow` must be below `max_flow`. Any mode accepts the table. `flow_temp` requires it and limits its flow target to the curve. The other modes do not use it. |
+| `fallback_flow` | `flow_temp` only. The flow the bridge heats at once Home Assistant has been offline for 30 minutes, between `min_flow` and `max_flow`. Without it, the bridge keeps the last switch and flow target. |
 
 Zone mode details:
 
@@ -101,6 +102,8 @@ Home Assistant gets these entities for zone 1:
 - The existing `Zone 1 flow temperature` and `Zone 1 flow setpoint temperature` sensors. Compare the flow setpoint with the target to check the conversion.
 
 The bridge sends each target change to the boiler immediately. The 300 s limit on outside-temperature changes applies only when Home Assistant writes the outside temperature itself. In this mode the outside-temperature number is not exposed. The bridge ignores commands sent to its topic.
+
+If Home Assistant stops, nothing sets the flow. Set `fallback_flow` in the zone's table, a flow between `min_flow` and `max_flow`, to have the bridge turn heating on at that flow once Home Assistant's MQTT status, `homeassistant/status`, has said `offline` for 30 minutes. Home Assistant publishes `offline` as its will message when it stops or loses the broker, and `online` when it comes back; the bridge then leaves the flow to Home Assistant again. The bridge cannot follow the weather during the fallback, because the real outdoor temperature comes from Home Assistant. The bridge watches the status, not the commands: a controller that writes only on change can stay silent for hours while it runs.
 
 Before you switch zone 1 to `flow_temp`:
 

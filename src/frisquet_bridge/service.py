@@ -75,8 +75,9 @@ class BridgeService:
 
     @staticmethod
     async def _publish_diagnostics(adapter: MqttAdapter, client: aiomqtt.Client, *, interval: float = 30.0) -> None:
-        'Republish diagnostics so freshness can transition without RF traffic.'
+        'Republish diagnostics so freshness can transition without RF traffic, and check the flow fallback.'
         while True:
+            await adapter.check_fallback()
             await adapter.publish_state(client)
             await asyncio.sleep(interval)
 

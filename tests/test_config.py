@@ -135,6 +135,9 @@ def test_load_rejects_invalid_config(tmp_path: Path):
         (FLOW_ZONE1 + 'slope = 1.5\nmin_flow = 65\nmax_flow = 20\n', "min_flow must be below max_flow"),
         (FLOW_ZONE1.replace("zone1", "zone2") + 'slope = 1.5\nmin_flow = 20\nmax_flow = 65\n', "flow_temp is only valid"),
         (FLOW_ZONE1 + 'slope = 1.5\nmin_flow = 20\nmax_flow = 65\n', "flow_temp requires frisquet.sonde"),
+        (FLOW_ZONE1.replace('association_id = "c0"\n', 'association_id = "c0"\nfallback_flow = 70\n') + 'slope = 1.5\nmin_flow = 20\nmax_flow = 65\n',
+            "fallback_flow: expected a flow between min_flow and max_flow"),
+        ('\n[frisquet.zone1]\nmode = "simple_satellite"\nassociation_id = "c0"\nfallback_flow = 45\n', 'fallback_flow: only valid with mode = "flow_temp"'),
         ("\n[home_assistant]\nenabled = true\n", "unknown field 'home_assistant'"),
         ('\n[logging]\nformat = "pretty"\n', "logging.format")]
     for i, (extra, match) in enumerate(cases):
