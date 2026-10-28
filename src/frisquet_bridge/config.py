@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 import tomlkit
@@ -82,11 +82,19 @@ class SondeConfig(DeviceIdentity):
     enabled: bool
 
 
+@dataclass(frozen=True)
+class HeatingCurve:
+    "A zone's heating curve as set in the boiler's installer menu"
+    slope: float # The coefficient k
+    min_flow: float # Minimum flow temperature
+    max_flow: float # Maximum flow temperature
+
+
 @dataclass
 class ZoneConfig:
     mode: str
     identity: DeviceIdentity | None = None
-    heating_curve_slope: float | None = None # flow_temp only: the slope set on the boiler
+    heating_curve: HeatingCurve | None = None # As set on the boiler; required by flow_temp
 
     @property
     def enabled(self) -> bool: return self.mode != "disabled"
@@ -147,9 +155,9 @@ class BridgeConfig:
     def boiler_entities_enabled(self) -> bool: return self.connect is not None
 
     @property
-    def flow_temp_slope(self) -> float | None:
-        'Heating-curve slope when zone 1 runs in flow_temp mode, else None'
-        return self.zone1.heating_curve_slope if self.zone1 is not None else None
+    def flow_curve(self) -> HeatingCurve | None:
+        'Heating curve of zone 1 when it runs in flow_temp mode, else None'
+        return self.zone1.heating_curve if self.zone1 is not None and self.zone1.is_flow_temp else None
 
     def protocol_state_kwargs(self, role: str) -> dict[str, object]:
         return self.identity(role).state_kwargs(self.network_id, self._persist_request_id(role))
@@ -351,7 +359,13 @@ def _zone_table(zone: ZoneConfig) -> tomlkit.items.Table:
     table = tomlkit.table()
     table.add("mode", zone.mode)
     if zone.identity is not None: table.add("association_id", f"{zone.identity.association_id:02x}")
-    if zone.heating_curve_slope is not None: table.add("heating_curve_slope", zone.heating_curve_slope)
+    if zone.heating_curve is not None: table.add("heating_curve", _heating_curve_table(zone.heating_curve))
+    return table
+
+
+def _heating_curve_table(curve: HeatingCurve) -> tomlkit.items.Table:
+    table = tomlkit.table()
+    for key, value in asdict(curve).items(): table.add(key, value)
     return table
 
 
@@ -379,17 +393,25 @@ def _load_zone(
     field_name: str,
     zone_number: int, # 1, 2 or 3; ZONE1_ONLY_MODES are only valid on zone1
 ) -> ZoneConfig:
-    _validate_keys(table, {"mode", "association_id", "heating_curve_slope"}, field_name)
+    _validate_keys(table, {"mode", "association_id", "heating_curve"}, field_name)
     mode = _parse_zone_mode(_required_str(table, "mode", f"{field_name}.mode"), f"{field_name}.mode")
     if mode in ZONE1_ONLY_MODES and zone_number != 1: raise ConfigError(f"{field_name}.mode: {mode} is only valid on frisquet.zone1")
     identity = _load_identity(table, field_name) if "association_id" in table else None
     if mode in VIRTUAL_SATELLITE_MODES and identity is None: raise ConfigError(f"missing required field: {field_name}.association_id")
-    slope = table.get("heating_curve_slope")
-    if mode == "flow_temp":
-        if slope is None: raise ConfigError(f"missing required field: {field_name}.heating_curve_slope")
-        slope = _positive_float(slope, f"{field_name}.heating_curve_slope")
-    elif slope is not None: raise ConfigError(f"{field_name}.heating_curve_slope: only valid with mode = \"flow_temp\"")
-    return ZoneConfig(mode=mode, identity=identity, heating_curve_slope=slope)
+    curve_table = _optional_table(table, "heating_curve")
+    curve = _load_heating_curve(curve_table, f"{field_name}.heating_curve") if curve_table is not None else None
+    if mode == "flow_temp" and curve is None: raise ConfigError(f"missing required table: {field_name}.heating_curve")
+    return ZoneConfig(mode=mode, identity=identity, heating_curve=curve)
+
+
+def _load_heating_curve(table: dict[str, object], field_name: str) -> HeatingCurve:
+    _validate_keys(table, {f.name for f in fields(HeatingCurve)}, field_name)
+    def value(key):
+        if key not in table: raise ConfigError(f"missing required field: {field_name}.{key}")
+        return _positive_float(table[key], f"{field_name}.{key}")
+    curve = HeatingCurve(**{f.name: value(f.name) for f in fields(HeatingCurve)})
+    if curve.min_flow >= curve.max_flow: raise ConfigError(f"{field_name}: min_flow must be below max_flow")
+    return curve
 
 
 def _validate_zone_topology(cfg: BridgeConfig) -> None:

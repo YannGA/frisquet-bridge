@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from frisquet_bridge.climate import HVAC_HEAT, HVAC_OFF, PRESET_COMFORT, PRESET_ECO, parse_hvac_mode, parse_preset
+from frisquet_bridge.config import HeatingCurve
 from frisquet_bridge.model import SONDE_MIN_TEMPERATURE, ZoneMode, ZoneState
 
 SIMPLE_HVAC_MODES = (HVAC_OFF, HVAC_HEAT)
@@ -101,9 +102,9 @@ def flow_temp_outdoor(flow: float, slope: float) -> float:
     return FLOW_CURVE_OUTDOOR - (flow - FLOW_CURVE_FLOW) / slope
 
 
-def flow_temp_max(slope: float) -> float:
-    'Flow the curve gives at the lowest outdoor temperature the sonde can encode'
-    return FLOW_CURVE_FLOW + slope * (FLOW_CURVE_OUTDOOR - SONDE_MIN_TEMPERATURE)
+def flow_temp_range(curve: HeatingCurve) -> tuple[float, float]:
+    'Flow targets the boiler can reach: its minimum flow to its maximum, capped by the curve at the coldest outdoor temperature the sonde can encode'
+    return curve.min_flow, min(curve.max_flow, FLOW_CURVE_FLOW + curve.slope * (FLOW_CURVE_OUTDOOR - SONDE_MIN_TEMPERATURE))
 
 
 def flow_temp_consigne(zone: ZoneState) -> Consigne | None:

@@ -59,7 +59,7 @@ When enabled, Home Assistant gets an outside-temperature number entity. Writes a
 |---|---|
 | `mode` | One of `disabled`, `satellite`, `virtual_satellite`, `simple_satellite`, `central_boiler`, `flow_temp`. |
 | `association_id` | Required only when the bridge emulates the satellite: `virtual_satellite`, `simple_satellite`, `central_boiler`, or `flow_temp`. |
-| `heating_curve_slope` | The heating-curve slope set on the boiler. Required with `flow_temp`, and rejected with any other mode. |
+| `heating_curve` | Table with the heating curve set on the boiler for this zone: `slope` (the coefficient k), `min_flow` and `max_flow` (flow temperatures in °C). All three keys are required, and `min_flow` must be below `max_flow`. Any mode accepts the table. `flow_temp` requires it and limits its flow target to the curve. The other modes do not use it. |
 
 Zone mode details:
 
@@ -74,9 +74,9 @@ Zone mode details:
 
 In `flow_temp` mode, Home Assistant sets the boiler's flow temperature. The boiler must run zone 1 in outdoor-only regulation, where its flow target depends only on the outdoor temperature and the heating-curve slope. The bridge sends the boiler a virtual outdoor temperature through the sonde, at which the curve gives the requested flow:
 
-    outdoor = 20 - (flow target - 19.8) / heating_curve_slope
+    outdoor = 20 - (flow target - 19.8) / slope
 
-Configure zone 1 with the slope the boiler uses, and enable the sonde:
+Configure zone 1 with the heating curve set on the boiler, and enable the sonde:
 
 ```toml
 [frisquet.sonde]
@@ -86,13 +86,17 @@ enabled = true
 [frisquet.zone1]
 mode = "flow_temp"
 association_id = "c0"
-heating_curve_slope = 1.6
+
+[frisquet.zone1.heating_curve]
+slope = 1.5
+min_flow = 20
+max_flow = 65
 ```
 
 Home Assistant gets these entities for zone 1:
 
 - `Flow temperature heating`, a switch. On puts zone 1 in comfort at 20 °C. Off puts zone 1 in frost protection.
-- `Flow temperature target`, a number from 19.8 °C to 19.8 + 50 × `heating_curve_slope`. The upper limit is the curve's value at -30 °C, the lowest outdoor temperature the sonde can send. The bridge clamps targets outside this range.
+- `Flow temperature target`, a number from `min_flow` to `max_flow`. The bridge lowers the upper limit to 19.8 + 50 × `slope` when that is below `max_flow`. That value is the curve's flow at -30 °C, the lowest outdoor temperature the sonde can send. The bridge clamps targets outside the range.
 - `Virtual outside temperature`, a diagnostic sensor with the value last sent through the sonde.
 - The existing `Zone 1 flow temperature` and `Zone 1 flow setpoint temperature` sensors. Compare the flow setpoint with the target to check the conversion.
 
@@ -101,8 +105,8 @@ The bridge sends each target change to the boiler immediately. The 300 s limit o
 Before you switch zone 1 to `flow_temp`:
 
 1. Pair the sonde identity with `uv run frisquet-bridge pair sonde --config config.toml`. Disable zones 2 and 3.
-2. In the boiler's installer menu, set zone 1 to outdoor-only regulation, without room influence.
-3. Set `heating_curve_slope` to the slope shown on the boiler. Update it whenever the slope on the boiler changes.
+2. In the boiler's installer menu, set zone 1's regulation to `Externe` (outdoor only, without room influence). The boiler then asks for the coefficient k, the maximum flow temperature and the minimum flow temperature.
+3. Enter the same three values as `slope`, `max_flow` and `min_flow` in `[frisquet.zone1.heating_curve]`. Update them whenever they change on the boiler.
 4. Set "Chauffage M/A" low. In this mode it compares the flow target with the virtual outdoor temperature. A high value stops the boiler at low flow targets.
 5. Set a few targets and compare the zone 1 flow setpoint sensor with each one.
 

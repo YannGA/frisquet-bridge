@@ -142,14 +142,14 @@ class BridgeService:
                     on_zone_config=lambda: save_zone_state(self.cfg.state_path, self.data))
 
             # In flow_temp mode the bridge derives the sonde value from the persisted flow target. Changes skip the rate limit.
-            flow_slope = self.cfg.flow_temp_slope
+            flow_curve = self.cfg.flow_curve
             flow_target = self.data.zones[1].flow_target
-            if flow_slope is not None and flow_target is not None: self.data.sonde.outside_temperature = flow_temp_outdoor(flow_target, flow_slope)
+            if flow_curve is not None and flow_target is not None: self.data.sonde.outside_temperature = flow_temp_outdoor(flow_target, flow_curve.slope)
             poll_connect = connect_ops is not None and self.cfg.connect_reads_enabled
             poll_satellite_info = _has_read_only_satellite_zone(self.cfg, enabled_zones)
             scheduler = PollScheduler(connect_ops, self.data, poll_connect=poll_connect, poll_satellite_info=poll_satellite_info,
                 sonde_ops=sonde_ops, push_outside_temperature=self.cfg.sonde is not None and self.cfg.sonde.enabled,
-                outside_temperature_min_change_interval=OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL if flow_slope is None else 0.0,
+                outside_temperature_min_change_interval=OUTSIDE_TEMPERATURE_MIN_CHANGE_INTERVAL if flow_curve is None else 0.0,
                 sensor_interval=self.cfg.sensor_poll_interval_seconds, enabled_zones=enabled_zones, on_update=publish_mqtt)
 
             if self.cfg.mqtt.enabled:

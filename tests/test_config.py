@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from frisquet_bridge.config import BridgeConfig, ConfigError, load
+from frisquet_bridge.config import BridgeConfig, ConfigError, DeviceIdentity, HeatingCurve, ZoneConfig, load
 
 BASE = r"""[frisquet]
 network_id = "05d97f78"
 boiler_addr = "80"
 """
+FLOW_ZONE1 = '\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\n\n[frisquet.zone1.heating_curve]\n'
 
 
 def test_load_full_config(tmp_path: Path):
@@ -128,11 +129,12 @@ def test_load_rejects_invalid_config(tmp_path: Path):
             '\n[frisquet.zone1]\nmode = "central_boiler"\nassociation_id = "c0"\n\n[frisquet.zone2]\nmode = "satellite"\n',
             "requires zone2 to be disabled",
         ),
-        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\n', "zone1.heating_curve_slope"),
-        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 0\n', "expected positive number"),
-        ('\n[frisquet.zone1]\nmode = "simple_satellite"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', 'only valid with mode = "flow_temp"'),
-        ('\n[frisquet.zone2]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', "flow_temp is only valid"),
-        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\nheating_curve_slope = 1.6\n', "flow_temp requires frisquet.sonde"),
+        ('\n[frisquet.zone1]\nmode = "flow_temp"\nassociation_id = "c0"\n', "missing required table: frisquet.zone1.heating_curve"),
+        (FLOW_ZONE1 + 'slope = 0\nmin_flow = 20\nmax_flow = 65\n', "expected positive number"),
+        (FLOW_ZONE1 + 'slope = 1.5\nmin_flow = 20\n', "heating_curve.max_flow"),
+        (FLOW_ZONE1 + 'slope = 1.5\nmin_flow = 65\nmax_flow = 20\n', "min_flow must be below max_flow"),
+        (FLOW_ZONE1.replace("zone1", "zone2") + 'slope = 1.5\nmin_flow = 20\nmax_flow = 65\n', "flow_temp is only valid"),
+        (FLOW_ZONE1 + 'slope = 1.5\nmin_flow = 20\nmax_flow = 65\n', "flow_temp requires frisquet.sonde"),
         ("\n[home_assistant]\nenabled = true\n", "unknown field 'home_assistant'"),
         ('\n[logging]\nformat = "pretty"\n', "logging.format")]
     for i, (extra, match) in enumerate(cases):
@@ -172,6 +174,9 @@ def test_save_load_round_trip(tmp_path: Path):
     cfg = BridgeConfig(path=path, network_id=bytes.fromhex("05d97f78"), boiler_addr=0x80)
     cfg.set_identity("connect", association_id=0xEA, request_id=0x48)
     cfg.set_identity("sonde", association_id=0x9C, request_id=0x18)
+    # Every mode keeps the boiler's heating curve, not only flow_temp, which needs it.
+    cfg.zone1 = ZoneConfig(mode="simple_satellite", identity=DeviceIdentity(association_id=0xC0, request_id=0),
+        heating_curve=HeatingCurve(slope=1.5, min_flow=20.0, max_flow=65.0))
 
     cfg.save()
     loaded = load(path)
@@ -184,4 +189,4 @@ def test_save_load_round_trip(tmp_path: Path):
     assert loaded.sonde.enabled is True
     assert loaded.sonde.association_id == 0x9C
     assert loaded.sonde.request_id == 0x18
-    assert loaded.zone1 is None
+    assert loaded.zone1.heating_curve == HeatingCurve(slope=1.5, min_flow=20.0, max_flow=65.0)

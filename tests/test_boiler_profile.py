@@ -3,9 +3,10 @@
 import pytest
 
 from frisquet_bridge.boiler_profile import (FLOW_CURVE_FLOW, SIMPLE_DEFAULT_COMFORT_TEMPERATURE, SIMPLE_DEFAULT_FROST_TEMPERATURE,
-    SIMPLE_DEFAULT_REDUCED_TEMPERATURE, apply_simple_command, central_boiler_consigne, flow_temp_consigne, flow_temp_max, flow_temp_outdoor,
+    SIMPLE_DEFAULT_REDUCED_TEMPERATURE, apply_simple_command, central_boiler_consigne, flow_temp_consigne, flow_temp_outdoor, flow_temp_range,
     simple_consigne, simple_target_temperature)
 from frisquet_bridge.climate import HVAC_AUTO, HVAC_HEAT, PRESET_ECO
+from frisquet_bridge.config import HeatingCurve
 from frisquet_bridge.model import ZoneMode, ZoneState
 
 
@@ -78,7 +79,9 @@ def test_flow_temp_reports_the_outdoor_temperature_that_gives_the_flow():
     # At slope 1.6 a 38.1 °C flow sits 18.3 °C above the curve's 19.8 °C base, which is 11.44 °C of outdoor below 20 °C.
     assert flow_temp_outdoor(38.1, 1.6) == pytest.approx(8.5625)
     assert flow_temp_outdoor(FLOW_CURVE_FLOW, 1.6) == 20.0
-    assert flow_temp_max(1.6) == pytest.approx(99.8)
+    # The target runs from the boiler's minimum flow to its maximum, unless the sonde's -30 °C floor caps the curve lower.
+    assert flow_temp_range(HeatingCurve(slope=1.5, min_flow=20.0, max_flow=65.0)) == (20.0, 65.0)
+    assert flow_temp_range(HeatingCurve(slope=1.6, min_flow=20.0, max_flow=120.0))[1] == pytest.approx(99.8)
 
     zone = ZoneState(zone=1, mode=ZoneMode.AUTO, boost=True)
     assert flow_temp_consigne(zone) is None

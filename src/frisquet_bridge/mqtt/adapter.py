@@ -8,8 +8,8 @@ from typing import Any
 
 import aiomqtt, structlog
 
-from frisquet_bridge.boiler_profile import (FLOW_CURVE_FLOW, SIMPLE_HVAC_MODES, SIMPLE_PRESET_MODES, apply_simple_command, flow_temp_max,
-    flow_temp_outdoor, simple_hvac_mode, simple_preset, simple_target_temperature)
+from frisquet_bridge.boiler_profile import (SIMPLE_HVAC_MODES, SIMPLE_PRESET_MODES, apply_simple_command, flow_temp_outdoor, flow_temp_range,
+    simple_hvac_mode, simple_preset, simple_target_temperature)
 from frisquet_bridge.climate import (HVAC_MODES, PRESET_BOOST, PRESET_MODES, apply_zone_intent, resolve_zone_intent, zone_hvac_action, zone_hvac_mode,
     zone_preset, zone_target_temperature)
 from frisquet_bridge.config import ZONE1_ONLY_MODES, BridgeConfig
@@ -198,7 +198,7 @@ class MqttAdapter:
         zone_cfg = self._zone_config(zone)
         return zone_cfg is not None and zone_cfg.is_central_boiler
 
-    def _is_flow_zone(self, zone: int) -> bool: return zone == 1 and self._cfg.flow_temp_slope is not None
+    def _is_flow_zone(self, zone: int) -> bool: return zone == 1 and self._cfg.flow_curve is not None
 
     def _is_zone1_profile(self, zone: int) -> bool:
         zone_cfg = self._zone_config(zone)
@@ -206,7 +206,7 @@ class MqttAdapter:
 
     def _sonde_exposed(self) -> bool:
         'Whether HA writes the outside sensor, which the bridge does itself in flow_temp mode'
-        return self._cfg.sonde is not None and self._cfg.sonde.enabled and self._cfg.flow_temp_slope is None
+        return self._cfg.sonde is not None and self._cfg.sonde.enabled and self._cfg.flow_curve is None
 
     def _is_read_only_satellite_zone(self, zone: int) -> bool:
         zone_cfg = self._zone_config(zone)
@@ -245,8 +245,8 @@ class MqttAdapter:
             self._temperature_sensor("central_outside_temperature", "central/outsideTemperature")]
 
     def _flow_components(self) -> list[tuple[str, _Config]]:
-        high = round(flow_temp_max(self._cfg.flow_temp_slope), 1)
-        return [self._switch("flow_demand", "flow/demand"), self._temperature_number("flow_target", "flow/target", FLOW_CURVE_FLOW, high),
+        low, high = flow_temp_range(self._cfg.flow_curve)
+        return [self._switch("flow_demand", "flow/demand"), self._temperature_number("flow_target", "flow/target", low, round(high, 1)),
             self._temperature_sensor("flow_outside_temperature", "flow/outsideTemperature", entity_category="diagnostic")]
 
     def _climate_components(self, zone: int) -> list[tuple[str, _Config]]:
@@ -414,7 +414,7 @@ class MqttAdapter:
             if self._on_change: await self._on_change()
         elif topic.endswith("outsideSensor/outsideTemperature/set"):
             temperature = float(payload)
-            if self._cfg.flow_temp_slope is not None: log.warning("mqtt_command_ignored", topic=topic, reason="flow_temp_owns_sonde")
+            if self._cfg.flow_curve is not None: log.warning("mqtt_command_ignored", topic=topic, reason="flow_temp_owns_sonde")
             elif self._outside_temperature_writer is not None: await self._outside_temperature_writer(temperature)
             elif self._sonde_ops is not None:
                 await self._sonde_ops.write_outside_temperature(self._data, temperature)
@@ -501,8 +501,8 @@ class MqttAdapter:
         if satellite is not None: satellite.request_send()
 
     async def _handle_flow_command(self, command: str, payload: str) -> None:
-        slope = self._cfg.flow_temp_slope
-        if slope is None:
+        curve = self._cfg.flow_curve
+        if curve is None:
             log.warning("mqtt_command_ignored", command=command)
             return
         zone = self._data.zones[1]
@@ -512,9 +512,10 @@ class MqttAdapter:
             satellite = self._virtual.get(1)
             if satellite is not None: satellite.request_send()
             return
-        zone.flow_target = min(max(round(float(payload), 1), FLOW_CURVE_FLOW), flow_temp_max(slope))
+        low, high = flow_temp_range(curve)
+        zone.flow_target = min(max(round(float(payload), 1), low), high)
         self._persist_state()
-        if self._outside_temperature_writer is not None: await self._outside_temperature_writer(flow_temp_outdoor(zone.flow_target, slope))
+        if self._outside_temperature_writer is not None: await self._outside_temperature_writer(flow_temp_outdoor(zone.flow_target, curve.slope))
 
     async def _handle_connect_zone_command(
         self,

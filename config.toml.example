@@ -14,6 +14,12 @@ association_id = "9c"
 [frisquet.zone1]
 mode = "satellite"
 
+# The heating curve set in the boiler's installer menu. Required by mode = "flow_temp".
+[frisquet.zone1.heating_curve]
+slope = 1.5
+min_flow = 20
+max_flow = 65
+
 [frisquet.zone2]
 mode = "disabled"
 

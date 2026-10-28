@@ -5,7 +5,7 @@ import asyncio, json
 import pytest
 
 from frisquet_bridge.climate import HVAC_AUTO, PRESET_COMFORT
-from frisquet_bridge.config import BridgeConfig, ConnectConfig, DeviceIdentity, SondeConfig, ZoneConfig
+from frisquet_bridge.config import BridgeConfig, ConnectConfig, DeviceIdentity, HeatingCurve, SondeConfig, ZoneConfig
 from frisquet_bridge.model import BoilerData, BoilerStatus, DhwMode, ZoneMode, ZoneSource
 from frisquet_bridge.mqtt.adapter import DEVICE_TOPIC, MqttAdapter
 
@@ -207,11 +207,12 @@ async def test_number_discovery_sends_the_sonde_range(tmp_path):
     outside = components["number_outside_temperature"]
     assert (outside["min"], outside["max"]) == (-30.0, 80.0)
 
-    cfg.zone1 = ZoneConfig(mode="flow_temp", identity=DeviceIdentity(association_id=0xC0, request_id=0), heating_curve_slope=1.6)
+    cfg.zone1 = ZoneConfig(mode="flow_temp", identity=DeviceIdentity(association_id=0xC0, request_id=0),
+        heating_curve=HeatingCurve(slope=1.5, min_flow=20.0, max_flow=65.0))
     _client, components = await _discover(MqttAdapter(cfg, BoilerData(), None))
     assert "number_outside_temperature" not in components
     target = components["number_flow_target"]
-    assert (target["min"], target["max"], target["command_topic"]) == (19.8, 99.8, "frisquet/flow/target/set")
+    assert (target["min"], target["max"], target["command_topic"]) == (20.0, 65.0, "frisquet/flow/target/set")
 
 
 async def test_discovery_migrates_old_topics_and_removes_entities_from_earlier_runs(adapter):
